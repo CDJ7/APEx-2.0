@@ -120,6 +120,10 @@ class ArduinoLink:
         self._pending_cmd = None
         self._write(sp.make_stop())
 
+    def actuate(self, direction: int, duration_ms: int) -> bool:
+        """Return-bin actuator: 1 extend, -1 retract, 0 stop (the Arduino limits the run time)."""
+        return self._write(sp.make_actuator(direction, duration_ms))
+
     def clear_faults(self) -> None:
         self._write(sp.make_clear())
 

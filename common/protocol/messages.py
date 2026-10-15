@@ -49,6 +49,9 @@ class MsgType(str, Enum):
     GET_MAP = "get_map"
     SET_POSE = "set_pose"
     SIM = "sim"                    # simulation-only scenario control
+    LOAD = "load"                  # station: KUKA arm loading order <order_id> (AGV must stay docked)
+    LOAD_ABORT = "load_abort"      # station: loading abandoned
+    DISCHARGE = "discharge"        # station: tip the return bin (linear actuator) while docked
     PING = "ping"
     # AGV -> client
     WELCOME = "welcome"
@@ -75,6 +78,13 @@ class EventKind(str, Enum):
     FAULT_CLEARED = "fault_cleared"
     ESTOP = "estop"
     STATE_CHANGE = "state_change"
+    DOCKED = "docked"
+    DOCK_FAILED = "dock_failed"
+    DISCHARGE_DONE = "discharge_done"
+    MANUAL_MODE = "manual_mode"
+    LINK_LOST = "link_lost"
+    LINK_RESTORED = "link_restored"
+    TASK_FAILED = "task_failed"
 
 
 #: Required ``data`` keys and their accepted python types, per message type.
@@ -92,6 +102,9 @@ _SCHEMAS: dict[MsgType, dict[str, tuple[type, ...]]] = {
     MsgType.GET_MAP: {},
     MsgType.SET_POSE: {},
     MsgType.SIM: {"action": (str,)},
+    MsgType.LOAD: {"order_id": (int,)},
+    MsgType.LOAD_ABORT: {},
+    MsgType.DISCHARGE: {},
     MsgType.PING: {},
     MsgType.WELCOME: {"agv_id": (str,)},
     MsgType.ACK: {"ref": (str,), "ok": (bool,)},
@@ -146,6 +159,11 @@ class Telemetry:
     route_nodes: list[str] = field(default_factory=list)
     blocked_edges: list[list[str]] = field(default_factory=list)
     sensors: dict[str, Any] = field(default_factory=dict)
+    docked: bool = False                      # Hall home-dock sensor (charging / waiting position)
+    manual: bool = False                      # Flysky RC override active
+    actuator: int = 0                         # return-bin actuator 1 extending / -1 retracting / 0 idle
+    link_hold: bool = False                   # motion held because the station link went stale
+    loading_order_id: int | None = None
     simulation: bool = False
     uptime_s: float = 0.0
 

@@ -15,6 +15,8 @@ from __future__ import annotations
 import asyncio
 import hmac
 import logging
+import math
+import time
 from typing import Any
 
 from agv_pi.controller.agv_controller import AgvController, CommandError
@@ -29,6 +31,7 @@ HELLO_TIMEOUT_S = 5.0
 CONTROL_COMMANDS = {
     MsgType.DISPATCH, MsgType.CANCEL, MsgType.RELEASE, MsgType.RETURN_HOME, MsgType.ESTOP, MsgType.RESET,
     MsgType.PAUSE, MsgType.RESUME, MsgType.CLEAR_BLOCKED, MsgType.SET_POSE, MsgType.SIM,
+    MsgType.LOAD, MsgType.LOAD_ABORT, MsgType.DISCHARGE,
 }
 
 
@@ -51,7 +54,13 @@ class AgvServer:
         self.telemetry_period = 1.0 / float(cfg.get("agv.telemetry_hz", 5.0))
         self.clients: set[_Client] = set()
         self._server: asyncio.base_events.Server | None = None
+        self.last_client_msg = 0.0       # monotonic time of the last message from any client
         controller.set_event_sink(self.broadcast)
+        controller.link_age = self.link_age
+
+    def link_age(self) -> float:
+        """Seconds since any authenticated client last sent something (clients ping every 1 s)."""
+        return math.inf if not self.last_client_msg else time.monotonic() - self.last_client_msg
 
     async def start(self) -> None:
         self._server = await asyncio.start_server(self._handle, self.host, self.port, limit=STREAM_LIMIT)
@@ -107,6 +116,7 @@ class AgvServer:
 
         client = _Client(writer, ip, str(hello["data"].get("client", "?")))
         self.clients.add(client)
+        self.last_client_msg = time.monotonic()
         log.info("client connected %s", kv(ip=ip, client=client.name))
         sender = asyncio.create_task(self._sender(client))
         try:
@@ -123,6 +133,7 @@ class AgvServer:
                     continue
                 if msg is None:
                     break
+                self.last_client_msg = time.monotonic()
                 reply = self._dispatch(msg, client)
                 if reply is not None:
                     client.queue.put_nowait(reply)

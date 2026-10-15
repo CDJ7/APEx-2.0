@@ -79,7 +79,8 @@ def build_runtime(cfg: Config) -> Runtime:
                          lidar_noise_m=float(sc.get("lidar_noise_m", 0.01)),
                          speed_factor=float(sc.get("speed_factor", 1.0)))
         ir_digital = cfg.get("agv.ir.type") == "digital"
-        serial_factory = lambda: SimArduinoSerial(world, ir_digital=ir_digital)  # noqa: E731
+        bumpers = bool(cfg.get("agv.arduino.bumpers_fitted", False))
+        serial_factory = lambda: SimArduinoSerial(world, ir_digital=ir_digital, bumpers_fitted=bumpers)  # noqa: E731
         scan_source = SimLidar(world, cfg)
         if vision_cfg.get("enabled", True):
             camera = SimCamera(world, int(vision_cfg.get("width", 640)), int(vision_cfg.get("height", 480)))

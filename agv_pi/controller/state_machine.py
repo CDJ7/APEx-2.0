@@ -2,20 +2,20 @@
 
 ::
 
-          dispatch            route ok
-    IDLE ─────────► RECEIVING_TASK ─────────► NAVIGATING ───────► ARRIVED
-     ▲                    │ no route              │  ▲   goal          │ release /
-     │                    ▼                       │  │                 │ dwell timeout
-     └──────────────── (IDLE)                     ▼  │ clear           ▼
-     ▲                              OBSTACLE_WAIT ───┘             RETURNING ──► IDLE
-     │                                    │ static > timeout           (same obstacle
-     │                                    ▼                             handling)
-     │                               REROUTING ──► NAVIGATING / RETURNING
-     │
-     └── reset ── FAULT  ◄── any state (sensor / link / localisation failure)
-     └── reset ── E_STOP ◄── any state (hardware button, station, PLC)
+                load (KUKA arm)            dispatch (load verified + PLC permit)
+    IDLE ──────────────────► LOADING ─────────────────► RECEIVING_TASK ──► NAVIGATING
+     ▲ (docked: charging /                                    │ no route        │
+     │  waiting)                                              ▼                 ▼
+     │                                                      IDLE      OBSTACLE_WAIT ⇄ REROUTING
+     │                                                                          │
+     │                      release / dwell                                     ▼
+     └── DOCKING (Hall) ◄── RETURNING ◄────────────────────────────────── ARRIVED
 
-``MANUAL`` is used by the mapping/teleop tool.
+     FAULT  ◄── any state (sensor / link / localisation / task timeout)   ── reset ──► IDLE
+     E_STOP ◄── any state (hardware button, station, PLC)                ── reset ──► IDLE
+     MANUAL ◄── any non-safety state while the Flysky RC override is on  ── off   ──► IDLE
+
+In MANUAL, LOADING, DOCKED-IDLE (charging) no autonomous motion is commanded.
 """
 
 from __future__ import annotations
@@ -30,19 +30,22 @@ from common.protocol.states import AgvState as S
 
 log = logging.getLogger("agv.state")
 
-_ANY_TO_SAFETY = {S.FAULT, S.E_STOP}
+# FAULT / E_STOP and MANUAL (Flysky RC override) may interrupt any non-safety state.
+_ANY_TO_SAFETY = {S.FAULT, S.E_STOP, S.MANUAL}
 
 TRANSITIONS: dict[S, set[S]] = {
-    S.IDLE: {S.RECEIVING_TASK, S.RETURNING, S.MANUAL} | _ANY_TO_SAFETY,
-    S.RECEIVING_TASK: {S.NAVIGATING, S.RETURNING, S.IDLE} | _ANY_TO_SAFETY,
+    S.IDLE: {S.RECEIVING_TASK, S.RETURNING, S.LOADING, S.DOCKING} | _ANY_TO_SAFETY,
+    S.LOADING: {S.RECEIVING_TASK, S.IDLE} | _ANY_TO_SAFETY,
+    S.RECEIVING_TASK: {S.NAVIGATING, S.RETURNING, S.IDLE, S.LOADING} | _ANY_TO_SAFETY,
     S.NAVIGATING: {S.OBSTACLE_WAIT, S.ARRIVED, S.RETURNING, S.REROUTING, S.IDLE} | _ANY_TO_SAFETY,
     S.OBSTACLE_WAIT: {S.NAVIGATING, S.RETURNING, S.REROUTING, S.IDLE} | _ANY_TO_SAFETY,
     S.REROUTING: {S.NAVIGATING, S.RETURNING, S.OBSTACLE_WAIT, S.IDLE} | _ANY_TO_SAFETY,
     S.ARRIVED: {S.RETURNING, S.IDLE} | _ANY_TO_SAFETY,
-    S.RETURNING: {S.OBSTACLE_WAIT, S.REROUTING, S.IDLE, S.ARRIVED} | _ANY_TO_SAFETY,
+    S.RETURNING: {S.OBSTACLE_WAIT, S.REROUTING, S.IDLE, S.ARRIVED, S.DOCKING} | _ANY_TO_SAFETY,
+    S.DOCKING: {S.IDLE, S.RETURNING} | _ANY_TO_SAFETY,
     S.FAULT: {S.IDLE, S.NAVIGATING, S.RETURNING, S.E_STOP},
     S.E_STOP: {S.IDLE, S.NAVIGATING, S.RETURNING, S.FAULT},
-    S.MANUAL: {S.IDLE} | _ANY_TO_SAFETY,
+    S.MANUAL: {S.IDLE, S.FAULT, S.E_STOP},
     S.OFFLINE: set(),
 }
 

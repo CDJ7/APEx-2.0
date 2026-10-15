@@ -2,7 +2,13 @@
 
 Responsibilities:
 
-* the task/state machine (``IDLE -> RECEIVING_TASK -> NAVIGATING -> ...``);
+* the task/state machine (``IDLE -> LOADING -> RECEIVING_TASK -> NAVIGATING -> ...
+  -> RETURNING -> DOCKING -> IDLE``);
+* home-station behaviour from the midterm report: stay docked (Hall sensor) and
+  motion-inhibited while the KUKA arm loads, tip the return bin (linear
+  actuator) for defective parts, dock precisely for charging;
+* the report's "stale link -> stop" rule and a per-leg task timeout;
+* the Flysky RC manual override (Arduino-side) -> MANUAL, no autonomous motion;
 * sensor fusion for safety (LiDAR + camera + IR, see :mod:`.safety`);
 * route planning, path following and obstacle classification / rerouting;
 * converting the desired motion into wheel PWM for the Arduino (the slave);
@@ -49,6 +55,10 @@ from common.protocol.states import FaultCode
 log = logging.getLogger("agv.controller")
 
 MOVING_STATES = (S.NAVIGATING, S.RETURNING)
+LINK_CHECK_STATES = (S.NAVIGATING, S.RETURNING, S.REROUTING, S.OBSTACLE_WAIT, S.DOCKING)
+# Faults that are only reported (they never push the AGV into FAULT by themselves):
+# DOCK and LINK_LOST have their own handling, CAMERA/LOW_BATTERY are warnings.
+NON_BLOCKING = {FaultCode.CAMERA, FaultCode.LOW_BATTERY, FaultCode.DOCK, FaultCode.LINK_LOST}
 
 
 class CommandError(Exception):
@@ -87,6 +97,17 @@ class AgvController:
         self.blocked_expiry_s = float(nc.get("blocked_segment_expiry_s", 0))
         self.arrived_dwell_s = float(nc.get("arrived_dwell_s", 0))
         self.slow_speed = float(nc.get("slow_speed_mps", 0.15))
+        self.task_timeout_s = float(nc.get("task_timeout_s", 900))
+        dc = cfg.section("agv.dock")
+        self.dock_required = bool(dc.get("required", True))
+        self.dock_speed = float(dc.get("approach_speed_mps", 0.06))
+        self.dock_max_s = float(dc.get("max_approach_s", 15.0))
+        self.relocalize_on_dock = bool(dc.get("relocalize_on_dock", True))
+        ac = cfg.section("agv.actuator")
+        self.act_times = (int(ac.get("extend_ms", 6000)), int(ac.get("hold_ms", 2000)), int(ac.get("retract_ms", 6500)))
+        sc = cfg.section("agv.safety")
+        self.link_timeout_s = float(sc.get("station_link_timeout_s", 3.0))
+        self.link_auto_resume = bool(sc.get("station_link_auto_resume", True))
         bc = cfg.section("agv.battery")
         self.batt_full, self.batt_empty = float(bc.get("full_mv", 12600)), float(bc.get("empty_mv", 10500))
 
@@ -109,6 +130,11 @@ class AgvController:
         self.pose = Pose2D()
         self.localized = False
         self.speed = 0.0
+        self.docked = False
+        self.manual = False
+        self.loading_order: int | None = None
+        self.link_hold = False
+        self.link_age: Callable[[], float] = lambda: 0.0     # set by AgvServer (seconds since last client msg)
 
         self._emit_cb: Callable[[dict[str, Any]], None] = lambda m: None
         self._hard_stopped = False
@@ -120,6 +146,12 @@ class AgvController:
         self._retry_at = 0.0
         self._started = time.monotonic()
         self._last_tick = time.monotonic()
+        self._leg_started = 0.0
+        self._task_timed_out = False
+        self._dock_failed = False
+        self._dock_phase = "approach"
+        self._discharge: list[tuple[float, int, int]] = []    # pending actuator steps (start_time, dir, ms)
+        self._was_docked = False
 
     # ================================================================ wiring
     def set_event_sink(self, cb: Callable[[dict[str, Any]], None]) -> None:
@@ -159,33 +191,78 @@ class AgvController:
             MsgType.CLEAR_BLOCKED: self._cmd_clear_blocked,
             MsgType.SET_POSE: self._cmd_set_pose,
             MsgType.SIM: self._cmd_sim,
+            MsgType.LOAD: self._cmd_load,
+            MsgType.LOAD_ABORT: self._cmd_load_abort,
+            MsgType.DISCHARGE: self._cmd_discharge,
         }.get(mtype)
         if handler is None:
             raise CommandError(f"unsupported command {mtype.value}")
         return handler(data) or {}
 
     def _blocking_faults(self) -> set[FaultCode]:
-        return {f for f in self.faults if f not in (FaultCode.CAMERA, FaultCode.LOW_BATTERY)} | (
+        return {f for f in self.faults if f not in NON_BLOCKING} | (
             {FaultCode.CAMERA} if FaultCode.CAMERA in self.faults and self.safety.camera_required else set())
+
+    def _require_home_ready(self, what: str) -> None:
+        if self.sw_estop or self._blocking_faults():
+            raise CommandError(f"AGV not ready: faults={[f.value for f in self._blocking_faults()]}")
+        if self.manual:
+            raise CommandError("manual RC override is active")
+        if self.dock_required and not self.docked:
+            raise CommandError(f"cannot {what}: AGV is not docked at {self.graph.home}")
+        if self._discharge:
+            raise CommandError("return bin is being discharged")
+
+    def _cmd_load(self, d: dict[str, Any]) -> dict[str, Any]:
+        """Station: the KUKA arm is about to load order <order_id>; keep the AGV still."""
+        oid = int(d["order_id"])
+        if self.sm.state == S.LOADING and self.loading_order == oid:
+            return {}
+        if self.sm.state != S.IDLE:
+            raise CommandError(f"AGV busy ({self.sm.state.value})")
+        self._require_home_ready("load")
+        self.loading_order = oid
+        self.sm.transition(S.LOADING, f"KUKA arm loading order {oid}")
+        return {}
+
+    def _cmd_load_abort(self, _d: dict[str, Any]) -> None:
+        if self.sm.state == S.LOADING:
+            self.loading_order = None
+            self.sm.transition(S.IDLE, "loading aborted")
+
+    def _cmd_discharge(self, _d: dict[str, Any]) -> None:
+        """Tip the return bin: extend, hold, retract (only while docked and stationary)."""
+        if self.sm.state not in (S.IDLE, S.LOADING):
+            raise CommandError(f"cannot discharge while {self.sm.state.value}")
+        if self._discharge:
+            return
+        self._require_home_ready("discharge")
+        ext, hold, ret = self.act_times
+        now = time.monotonic()
+        self._discharge = [(now, 1, ext), (now + (ext + hold) / 1000.0, -1, ret),
+                           (now + (ext + hold + ret) / 1000.0, 0, 0)]
 
     def _cmd_dispatch(self, d: dict[str, Any]) -> dict[str, Any]:
         order_id, dest = int(d["order_id"]), str(d["destination"])
-        if self.sm.state != S.IDLE:
+        if self.sm.state == S.LOADING and self.loading_order not in (None, order_id):
+            raise CommandError(f"AGV is loading order {self.loading_order}, not {order_id}")
+        if self.sm.state not in (S.IDLE, S.LOADING):
             raise CommandError(f"AGV busy ({self.sm.state.value})")
-        if self.sw_estop or self._blocking_faults():
-            raise CommandError(f"AGV not ready: faults={[f.value for f in self._blocking_faults()]}")
+        self._require_home_ready("depart")
         if dest not in self.graph.nodes or not self.graph.nodes[dest].is_station:
             raise CommandError(f"unknown destination station '{dest}'")
         if not self.localized:
             raise CommandError("AGV is not localised")
         self.task = Task(order_id, dest, list(d.get("items", [])))
+        came_from = self.sm.state
         self.sm.transition(S.RECEIVING_TASK, f"order {order_id} -> {dest}")
         route = self.planner.plan(self.pose, dest)
         if route is None:
             self._emit(EventKind.TASK_REJECTED, f"no route to {dest}", destination=dest)
             self.task = None
-            self.sm.transition(S.IDLE, "no route")
+            self.sm.transition(came_from, "no route")
             raise CommandError(f"no route to {dest}")
+        self.loading_order = None
         self._start_leg("delivery", route, S.NAVIGATING)
         self._emit(EventKind.TASK_ACCEPTED, f"order {order_id} to {dest}", destination=dest,
                    route=route.nodes, length_m=round(route.length, 1))
@@ -271,6 +348,9 @@ class AgvController:
         if action == "estop":
             w.estop = bool(d.get("pressed", True))
             return {}
+        if action == "rc_manual":
+            w.rc_manual = bool(d.get("on", True))
+            return {}
         if action == "list":
             return {"obstacles": [o.as_dict() for o in w.obstacles_snapshot()], "truth": w.truth().as_dict()}
         raise CommandError(f"unknown sim action {action}")
@@ -284,15 +364,20 @@ class AgvController:
         self._blocked_no_detour = None
         self._static_since = None
         self.wheels.reset()
+        self._leg_started = time.monotonic()
         self.sm.transition(state, f"{leg} leg to {route.goal} via {'-'.join(route.nodes)}")
 
     def _go_home(self, reason: str) -> None:
         home = self.graph.home
         node = self.graph.nodes[home]
         if math.hypot(self.pose.x - node.x, self.pose.y - node.y) < self.follower.goal_tol and self.sm.can(S.IDLE):
-            self.leg = None
             self.follower.set_route(None)
-            self.sm.transition(S.IDLE, f"{reason} (already home)")
+            if self.dock_required and not self.docked and self.sm.can(S.DOCKING):
+                self.leg = "return"
+                self._begin_docking(f"{reason} (already home)")
+            else:
+                self.leg = None
+                self.sm.transition(S.IDLE, f"{reason} (already home)")
             return
         route = self.planner.plan(self.pose, home)
         if route is None:
@@ -329,8 +414,26 @@ class AgvController:
         pts = to_frame(self.pose, frame.points_map) if frame is not None else None
         self.verdict = self.safety.evaluate(pts, lidar_age, vis, vis_age, ir, vision_enabled=self.vision is not None)
         self._update_faults(status, st_age, now)
+        self._update_dock(status)
+        self._run_discharge(now)
 
         state = self.sm.state
+        # ---- Flysky RC manual override (the Arduino drives; we only watch)
+        self.manual = bool(status and status.manual)
+        if self.manual and state not in (S.MANUAL, S.E_STOP, S.FAULT):
+            if self.task:
+                self._emit(EventKind.TASK_FAILED, f"order {self.task.order_id} interrupted by the manual RC override",
+                           result="ABORTED: manual override")
+            self.task, self.leg, self.loading_order = None, None, None
+            self.follower.set_route(None)
+            self.sm.transition(S.MANUAL, "Flysky RC override")
+            self._emit(EventKind.MANUAL_MODE, "manual RC override ON", on=True)
+            return
+        if state == S.MANUAL:
+            if not self.manual:
+                self.sm.transition(S.IDLE, "RC override off")
+                self._emit(EventKind.MANUAL_MODE, "manual RC override OFF", on=False)
+            return
         # ---- E-stop / fault handling has priority over everything
         if state in (S.E_STOP, S.FAULT):
             self._hard_stop()
@@ -350,6 +453,18 @@ class AgvController:
             self._emit(EventKind.FAULT, "fault: " + ", ".join(names), faults=names)
             return
 
+        # ---- per-leg task timeout (report: every task has a timeout and a result)
+        if (state in LINK_CHECK_STATES and self.leg is not None and self._leg_started
+                and now - self._leg_started > self.task_timeout_s):
+            self._task_timed_out = True
+            self._leg_started = 0.0
+            self._emit(EventKind.TASK_FAILED, f"{self.leg} leg exceeded {self.task_timeout_s:.0f} s",
+                       result="FAILED: TASK_TIMEOUT")
+            return
+
+        # ---- stale station link -> hold motion (report p. 8)
+        self._update_link_hold(state)
+
         if self.blocked_expiry_s > 0:
             for k in self.graph.expire_blocked(self.blocked_expiry_s):
                 self._emit(EventKind.SEGMENT_CLEARED, f"segment {k[0]}-{k[1]} expired", edge=list(k))
@@ -361,11 +476,13 @@ class AgvController:
             self._tick_obstacle_wait(frame, vis, now)
         elif state == S.REROUTING:
             self._tick_rerouting()
+        elif state == S.DOCKING:
+            self._tick_docking(status, dt, now)
         elif state == S.ARRIVED:
             self._stop_motion(status, dt)
             if self.arrived_dwell_s > 0 and self.sm.time_in_state >= self.arrived_dwell_s:
                 self._go_home("dwell time elapsed")
-        else:  # IDLE / RECEIVING_TASK / MANUAL
+        else:  # IDLE / LOADING / RECEIVING_TASK
             self._stop_motion(status, dt)
             if state == S.IDLE and self.leg == "return" and now >= self._retry_at:
                 self._go_home("retry")
@@ -391,6 +508,12 @@ class AgvController:
                 f.add(FaultCode.LOW_BATTERY)
         if self.sm.state in MOVING_STATES and not self.localized and self.lidar.frames.age() < 1.0:
             f.add(FaultCode.LOCALIZATION)
+        if self._task_timed_out:
+            f.add(FaultCode.TASK_TIMEOUT)
+        if self._dock_failed:
+            f.add(FaultCode.DOCK)
+        if self.link_hold:
+            f.add(FaultCode.LINK_LOST)
         new = f - self.faults
         if new and self.sm.state not in (S.FAULT, S.E_STOP):
             log.warning("faults raised %s", kv(faults=",".join(sorted(x.value for x in new))))
@@ -407,8 +530,9 @@ class AgvController:
         remaining = self._blocking_faults() - {FaultCode.HW_ESTOP}
         status = self.arduino.status.get()
         hw_estop = bool(status and (status.estop or status.fault & FaultFlags.ESTOP))
-        if not remaining and not hw_estop and not self.sw_estop:
+        if not remaining - {FaultCode.TASK_TIMEOUT} and not hw_estop and not self.sw_estop:
             self._reset_pending_since = None
+            self._task_timed_out = False
             if self.leg is not None and (self.task is not None or self.leg == "return"):
                 # resume the interrupted leg, but paused: an explicit RESUME starts motion
                 self.paused = True
@@ -440,7 +564,7 @@ class AgvController:
 
     def _drive(self, v: float, w: float, status, dt: float) -> None:
         """Send a body twist through the safety gate and wheel-speed loop."""
-        if self.paused:
+        if self.paused or self.link_hold or self.manual:
             v = w = 0.0
         if self.verdict.stop and v > 0:
             v = 0.0
@@ -489,11 +613,11 @@ class AgvController:
                 self._emit(EventKind.ARRIVED, f"arrived at {self.task.destination if self.task else '?'}",
                            destination=self.task.destination if self.task else None)
             else:
-                self.leg = None
                 self.follower.set_route(None)
-                self.sm.transition(S.IDLE, "home")
-                self._emit(EventKind.RETURNED_HOME, f"back at {self.graph.home}")
-                self.task = None
+                if self.dock_required:
+                    self._begin_docking("home node reached")
+                else:
+                    self._finish_return("home")
             return
         self._drive(cmd.v, cmd.w, status, dt)
 
@@ -575,6 +699,91 @@ class AgvController:
                    route=route.nodes, length_m=round(route.length, 1))
         self.sm.transition(state, "rerouted")
 
+    # ================================================================ home station
+    def _finish_return(self, reason: str) -> None:
+        self.leg = None
+        self.sm.transition(S.IDLE, reason)
+        self._emit(EventKind.RETURNED_HOME, f"back at {self.graph.home}", docked=self.docked)
+        self.task = None
+
+    def _begin_docking(self, reason: str) -> None:
+        self._dock_phase = "approach"
+        self._leg_started = time.monotonic()
+        self.sm.transition(S.DOCKING, reason)
+
+    def _tick_docking(self, status, dt: float, now: float) -> None:
+        """Creep onto the Hall magnet at the home node, then turn to the home heading."""
+        home = self.home_pose()
+        if self._dock_phase == "approach":
+            if self.docked:
+                self._hard_stop()
+                self._dock_phase = "align"
+                return
+            if self.sm.time_in_state > self.dock_max_s:
+                self._hard_stop()
+                self._dock_failed = True
+                self._emit(EventKind.DOCK_FAILED, f"Hall dock sensor not found within {self.dock_max_s:.0f} s")
+                self._finish_return("dock not confirmed")
+                return
+            dx, dy = home.x - self.pose.x, home.y - self.pose.y
+            bearing = math.atan2(dy, dx) - self.pose.theta
+            bearing = math.atan2(math.sin(bearing), math.cos(bearing))
+            dist = math.hypot(dx, dy)
+            if abs(bearing) > math.radians(30) and dist > 0.03:
+                self._drive(0.0, max(-0.6, min(0.6, 1.5 * bearing)), status, dt)
+            else:
+                v = min(self.dock_speed, max(0.02, dist))
+                self._drive(v, max(-0.4, min(0.4, 1.5 * bearing)), status, dt)
+            return
+        # align phase: rotate in place (the Hall sensor stays over the magnet)
+        err = math.atan2(math.sin(home.theta - self.pose.theta), math.cos(home.theta - self.pose.theta))
+        if abs(err) < math.radians(4) or self.sm.time_in_state > self.dock_max_s * 2:
+            self._hard_stop()
+            self._stop_motion(status, dt)
+            self._finish_return("docked")
+            return
+        self._drive(0.0, max(-0.5, min(0.5, 1.5 * err)), status, dt)
+
+    def _update_dock(self, status) -> None:
+        self.docked = bool(status and status.dock)
+        if self.docked and not self._was_docked:
+            self._dock_failed = False
+            self._emit(EventKind.DOCKED, f"docked at {self.graph.home} (charging / waiting position)")
+            home = self.home_pose()
+            if self.relocalize_on_dock and math.hypot(self.pose.x - home.x, self.pose.y - home.y) < 0.3:
+                # keep the current heading; the Hall sensor fixes position, not orientation
+                self.lidar.set_pose(Pose2D(home.x, home.y, self.pose.theta))
+        self._was_docked = self.docked
+
+    def _run_discharge(self, now: float) -> None:
+        while self._discharge and now >= self._discharge[0][0]:
+            _t, direction, ms = self._discharge.pop(0)
+            if self.sw_estop or self.manual or self.sm.state not in (S.IDLE, S.LOADING):
+                self.arduino.actuate(0, 0)
+                self._discharge.clear()
+                self._emit(EventKind.DISCHARGE_DONE, "return-bin discharge interrupted", ok=False)
+                return
+            if direction == 0 and ms == 0:
+                self._emit(EventKind.DISCHARGE_DONE, "return bin discharged", ok=True)
+            else:
+                self.arduino.actuate(direction, ms)
+
+    def _update_link_hold(self, state: S) -> None:
+        age = self.link_age()
+        if state in LINK_CHECK_STATES and age > self.link_timeout_s:
+            if not self.link_hold:
+                self.link_hold = True
+                self._hard_stop()
+                self._emit(EventKind.LINK_LOST, f"station link silent for {age:.1f} s - motion held")
+        elif self.link_hold and age <= self.link_timeout_s:
+            self.link_hold = False
+            if not self.link_auto_resume:
+                self.paused = True
+            self._emit(EventKind.LINK_RESTORED, "station link restored" +
+                       ("" if self.link_auto_resume else " - send 'resume' to continue"))
+        elif self.link_hold and state not in LINK_CHECK_STATES:
+            self.link_hold = False
+
     # ================================================================ telemetry
     def battery_pct(self, mv: int) -> float:
         return max(0.0, min(100.0, (mv - self.batt_empty) / (self.batt_full - self.batt_empty) * 100.0))
@@ -613,6 +822,11 @@ class AgvController:
             path=[[round(float(x), 2), round(float(y), 2)] for x, y in path[:60]],
             route_nodes=self.follower.route.nodes if self.follower.route else [],
             blocked_edges=[list(k) for k in self.graph.blocked],
+            docked=self.docked,
+            manual=self.manual,
+            actuator=status.act if status else 0,
+            link_hold=self.link_hold,
+            loading_order_id=self.loading_order,
             sensors={
                 "arduino": self.arduino.connected,
                 "lidar": self.lidar.connected and self.lidar.frames.age() < 1.0,

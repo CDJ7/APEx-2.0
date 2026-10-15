@@ -43,7 +43,9 @@ class AgvState(_CodedEnum):
     RETURNING = ("RETURNING", 6)
     FAULT = ("FAULT", 7)
     E_STOP = ("E_STOP", 8)
-    MANUAL = ("MANUAL", 9)          # teleop / mapping
+    MANUAL = ("MANUAL", 9)          # Flysky RC override / keyboard teleop (no autonomous motion)
+    LOADING = ("LOADING", 10)       # docked at home, KUKA arm loading the bins (motion inhibited)
+    DOCKING = ("DOCKING", 11)       # final approach onto the home-dock Hall sensor
     OFFLINE = ("OFFLINE", 15)       # used by the station when no telemetry arrives
 
     @property
@@ -61,6 +63,7 @@ class OrderStatus(_CodedEnum):
 
     PENDING = ("Pending", 0)
     APPROVED = ("Approved", 1)
+    LOADING = ("Loading", 6)           # at the home station: arm loading, phone scanning QR codes
     DISPATCHED = ("Dispatched", 2)     # sent to the AGV / in transit
     DELIVERED = ("Delivered", 3)       # AGV arrived at destination
     CLOSED = ("Closed", 4)             # receiving report completed
@@ -68,13 +71,15 @@ class OrderStatus(_CodedEnum):
 
     @property
     def is_open(self) -> bool:
-        return self in (OrderStatus.PENDING, OrderStatus.APPROVED, OrderStatus.DISPATCHED, OrderStatus.DELIVERED)
+        return self in (OrderStatus.PENDING, OrderStatus.APPROVED, OrderStatus.LOADING, OrderStatus.DISPATCHED,
+                        OrderStatus.DELIVERED)
 
 
 #: Allowed order status transitions (enforced by the station order service).
 ORDER_TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
     OrderStatus.PENDING: {OrderStatus.APPROVED, OrderStatus.CANCELLED},
-    OrderStatus.APPROVED: {OrderStatus.DISPATCHED, OrderStatus.CANCELLED},
+    OrderStatus.APPROVED: {OrderStatus.LOADING, OrderStatus.DISPATCHED, OrderStatus.CANCELLED},
+    OrderStatus.LOADING: {OrderStatus.DISPATCHED, OrderStatus.APPROVED, OrderStatus.CANCELLED},
     OrderStatus.DISPATCHED: {OrderStatus.DELIVERED, OrderStatus.APPROVED, OrderStatus.CANCELLED},
     OrderStatus.DELIVERED: {OrderStatus.CLOSED},
     OrderStatus.CLOSED: set(),
@@ -110,6 +115,9 @@ class FaultCode(_CodedEnum):
     LOW_BATTERY = ("LOW_BATTERY", 8)
     HW_ESTOP = ("HW_ESTOP", 9)
     INTERNAL = ("INTERNAL", 10)
+    TASK_TIMEOUT = ("TASK_TIMEOUT", 11)     # a delivery/return leg exceeded agv.navigation.task_timeout_s
+    DOCK = ("DOCK", 12)                     # Hall home-dock sensor not found during docking
+    LINK_LOST = ("LINK_LOST", 13)           # station link stale while moving -> motion held
 
     @property
     def bit(self) -> int:

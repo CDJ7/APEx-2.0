@@ -65,7 +65,7 @@ class JsonLineClient:
     def __init__(self, host: str, port: int, token: str, client_name: str,
                  on_message: Callable[[dict[str, Any]], None] | None = None,
                  on_connection: Callable[[bool], None] | None = None,
-                 reconnect_s: float = 2.0, connect_timeout_s: float = 3.0):
+                 reconnect_s: float = 2.0, connect_timeout_s: float = 3.0, keepalive_s: float = 1.0):
         self.host, self.port = host, port
         self._token = token
         self._name = client_name
@@ -73,6 +73,7 @@ class JsonLineClient:
         self._on_connection = on_connection or (lambda c: None)
         self._reconnect_s = reconnect_s
         self._timeout = connect_timeout_s
+        self._keepalive = keepalive_s          # periodic ping: lets the AGV detect a stale link
         self._sock: socket.socket | None = None
         self._send_lock = threading.Lock()
         self._stop = threading.Event()
@@ -149,7 +150,11 @@ class JsonLineClient:
 
     def _read_loop(self, sock: socket.socket) -> None:
         buf = bytearray()
+        next_ping = time.monotonic() + self._keepalive
         while not self._stop.is_set():
+            if self._keepalive > 0 and time.monotonic() >= next_ping:
+                next_ping = time.monotonic() + self._keepalive
+                self.send(MsgType.PING)
             try:
                 chunk = sock.recv(65536)
             except socket.timeout:

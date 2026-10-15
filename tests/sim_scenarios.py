@@ -7,6 +7,9 @@ Start the AGV simulator first (``python -m agv_pi.main --sim``), then::
     python -m tests.sim_scenarios block                    # permanent obstacle: block segment + reroute
     python -m tests.sim_scenarios deadend                  # obstacle with no alternative route
     python -m tests.sim_scenarios estop                    # hardware E-stop mid-route, reset + resume
+    python -m tests.sim_scenarios discharge                # docked: tip the return bin (actuator)
+    python -m tests.sim_scenarios manual                   # Flysky RC override mid-route -> MANUAL
+    python -m tests.sim_scenarios link                     # station link goes silent -> motion held
 
 Each scenario prints the AGV events as they happen and ends with PASS/FAIL,
 so it doubles as an acceptance test of the navigation behaviour.
@@ -28,6 +31,7 @@ from common.protocol.messages import MsgType
 
 class Scenario:
     def __init__(self, host: str, port: int, token: str):
+        self.host, self.port, self.token = host, port, token
         self.tel: dict = {}
         self.events: list[dict] = []
         self.acks: dict[str, dict] = {}
@@ -72,8 +76,14 @@ class Scenario:
             self.cmd(MsgType.SIM, {"action": "estop", "pressed": False})
             self.cmd(MsgType.RESET, {})
             time.sleep(1)
+        if self.tel.get("state") == "MANUAL":
+            self.cmd(MsgType.SIM, {"action": "rc_manual", "on": False})
+            time.sleep(0.5)
         if self.tel.get("state") == "ARRIVED":
             self.cmd(MsgType.RELEASE, {})
+        if self.tel.get("state") == "IDLE" and not self.tel.get("docked"):
+            self.cmd(MsgType.RETURN_HOME, {})
+            time.sleep(0.5)
         if self.tel.get("state") != "IDLE":
             print("  waiting for the AGV to become IDLE…")
             if not self.wait_state("IDLE", 180):
@@ -90,7 +100,8 @@ def deliver(s: Scenario, dest: str) -> bool:
     ok = s.wait_state("ARRIVED", 150)
     s.cmd(MsgType.RELEASE, {})
     ok &= s.wait_state("IDLE", 150)
-    return ok and s.seen("arrived") and s.seen("returned_home")
+    ok &= wait_for(lambda: s.tel.get("docked"), 3)
+    return ok and s.seen("arrived") and s.seen("returned_home") and s.seen("docked")
 
 
 def person(s: Scenario) -> bool:
@@ -151,21 +162,71 @@ def estop(s: Scenario) -> bool:
     return ok
 
 
+def discharge(s: Scenario) -> bool:
+    if not s.tel.get("docked"):
+        print("  AGV must be docked")
+        return False
+    ok = bool(s.cmd(MsgType.DISCHARGE, {}).get("ok"))
+    ok &= wait_for(lambda: s.tel.get("actuator") == 1, 3)
+    ok &= wait_for(lambda: any(e["kind"] == "discharge_done" for e in s.events), 30, 0.2)
+    return ok
+
+
+def manual(s: Scenario) -> bool:
+    s.dispatch("WS1")
+    wait_for(lambda: s.tel.get("pose", {}).get("x", 0) > 4.0, 60, 0.2)
+    s.cmd(MsgType.SIM, {"action": "rc_manual", "on": True})
+    ok = s.wait_state("MANUAL", 3)
+    time.sleep(1.0)
+    ok &= abs(s.tel.get("speed_mps", 1)) < 0.05 and s.seen("task_failed")
+    ok &= not s.cmd(MsgType.DISPATCH, {"order_id": 902, "destination": "WS1"}).get("ok")
+    s.cmd(MsgType.SIM, {"action": "rc_manual", "on": False})
+    ok &= s.wait_state("IDLE", 3)
+    s.cmd(MsgType.RETURN_HOME, {})
+    ok &= wait_for(lambda: s.tel.get("state") == "IDLE" and s.tel.get("docked"), 120, 0.3)
+    return ok
+
+
+def link(s: Scenario) -> bool:
+    s.dispatch("WS1")
+    wait_for(lambda: s.tel.get("pose", {}).get("x", 0) > 4.0, 60, 0.2)
+    print("  scenario client goes silent; a passive observer keeps watching")
+    s.client.stop()
+    seen: list[dict] = []
+    obs = JsonLineClient(s.host, s.port, s.token, "observer", keepalive_s=0,
+                         on_message=lambda m: seen.append(m))
+    obs.start()
+    ok = wait_for(lambda: any(m["type"] == "event" and m["data"]["kind"] == "link_lost" for m in seen), 10, 0.2)
+    time.sleep(1.5)
+    tel = [m["data"] for m in seen if m["type"] == "telemetry"]
+    ok &= bool(tel) and tel[-1]["link_hold"] and abs(tel[-1]["speed_mps"]) < 0.05
+    obs.stop()
+    s.client = JsonLineClient(s.host, s.port, s.token, "scenario", on_message=s._on)
+    s.client.start()
+    ok &= wait_for(lambda: any(e["kind"] == "link_restored" for e in s.events), 10, 0.2)
+    ok &= s.wait_state("ARRIVED", 120)
+    s.cmd(MsgType.RELEASE, {})
+    return ok
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("scenario", choices=["deliver", "person", "block", "deadend", "estop", "all"])
+    ap.add_argument("scenario", choices=["deliver", "person", "block", "deadend", "estop", "discharge", "manual",
+                                         "link", "all"])
     ap.add_argument("--dest", default="WS1")
     ap.add_argument("--config")
     args = ap.parse_args()
     cfg = load_config(args.config, simulation=True)
     s = Scenario(cfg.host("agv"), int(cfg.require("network.agv.port")), str(cfg.require("security.agv_token")))
-    names = ["deliver", "person", "block", "deadend", "estop"] if args.scenario == "all" else [args.scenario]
+    names = (["deliver", "discharge", "person", "block", "deadend", "estop", "manual", "link"]
+             if args.scenario == "all" else [args.scenario])
     results = {}
     for name in names:
         print(f"\n=== scenario: {name} ===")
         s.ensure_idle_home()
         fn = {"deliver": lambda: deliver(s, args.dest), "person": lambda: person(s), "block": lambda: block(s),
-              "deadend": lambda: deadend(s), "estop": lambda: estop(s)}[name]
+              "deadend": lambda: deadend(s), "estop": lambda: estop(s), "discharge": lambda: discharge(s),
+              "manual": lambda: manual(s), "link": lambda: link(s)}[name]
         results[name] = fn()
         print(f"=== {name}: {'PASS' if results[name] else 'FAIL'} ===")
     s.client.stop()
