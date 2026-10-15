@@ -87,7 +87,8 @@ class InventoryPage(Page):
         card = Card()
         self.model = DictTableModel(
             [("id", "ID"), ("part_number", "Part #"), ("name", "Name"), ("description", "Description"),
-             ("location", "Bin"), ("quantity", "On hand"), ("reorder_threshold", "Reorder at"), ("unit", "Unit"),
+             ("location", "Location"), ("quantity", "On hand"), ("damaged_qty", "Damaged"),
+             ("reorder_threshold", "Reorder at"), ("unit", "Unit"),
              ("status", "Status"), ("updated_at", "Last updated")],
             row_color=self._row_color,
             formatters={"updated_at": lambda v: (v or "")[:16].replace("T", " ")})
@@ -95,12 +96,13 @@ class InventoryPage(Page):
         self.table.doubleClicked.connect(lambda _i: self.edit_part())
         card.body.addWidget(self.table, 1)
         self.count = muted()
-        legend = muted("● amber = at/below reorder threshold    ● red = out of stock")
+        legend = muted("● amber = at/below reorder threshold    ● red = out of stock    "
+                       "Damaged = units returned damaged by the AGV")
         card.body.addLayout(hbox(self.count, None, legend))
         self.root.addWidget(card, 1)
         self.root.addLayout(hbox(button("+  Add part", "primary", self.add_part),
                                  button("Edit", slot=self.edit_part), button("Adjust stock…", slot=self.adjust),
-                                 None, button("Delete", "danger", self.delete_part), spacing=10))
+                                 button("Dispose damaged…", slot=self.dispose_damaged), None, button("Delete", "danger", self.delete_part), spacing=10))
         ctx.bridge.inventory_changed.connect(self.refresh)
 
     @staticmethod
@@ -120,7 +122,7 @@ class InventoryPage(Page):
         self.model.set_rows(rows)
         st = self.ctx.core.inventory.stats()
         self.count.setText(f"{len(rows)} shown · {st.get('skus', 0)} parts · {st.get('units', 0):,} units · "
-                           f"{st.get('low', 0)} low")
+                           f"{st.get('low', 0)} low · {st.get('damaged', 0)} damaged")
 
     # ------------------------------------------------------------------ actions
     def add_part(self) -> None:
@@ -166,6 +168,27 @@ class InventoryPage(Page):
             self.ctx.toast("success", f"{p['part_number']}: on hand now {p['quantity']}")
         except ValidationError as exc:
             error(self, "Adjust stock", str(exc))
+
+    def dispose_damaged(self) -> None:
+        row = selected_row(self.table)
+        if not row or not row.get("damaged_qty"):
+            self.ctx.toast("info", "Select a part with damaged units")
+            return
+        qty, ok = QInputDialog.getInt(self, "Dispose damaged units",
+                                      f"{row['part_number']} — {row['damaged_qty']} damaged unit(s)\n"
+                                      "Units scrapped / sent back to the supplier:", row["damaged_qty"], 1,
+                                      row["damaged_qty"])
+        if not ok:
+            return
+        reason, ok = QInputDialog.getText(self, "Dispose damaged units", "Reason (audit log):")
+        if not ok or not reason.strip():
+            self.ctx.toast("warning", "Cancelled - a reason is required")
+            return
+        try:
+            p = self.ctx.core.inventory.dispose_damaged(row["id"], qty, reason.strip(), self.ctx.operator)
+            self.ctx.toast("success", f"{p['part_number']}: {p['damaged_qty']} damaged unit(s) left")
+        except ValidationError as exc:
+            error(self, "Dispose damaged", str(exc))
 
     def delete_part(self) -> None:
         row = selected_row(self.table)

@@ -32,11 +32,15 @@ INFO = "#4aa3df"
 
 STATUS_COLORS = {
     # order statuses
-    "Pending": WARN, "Approved": INFO, "Dispatched": ACCENT, "Delivered": OK, "Closed": FAINT,
+    "Pending": WARN, "Approved": INFO, "Loading": WARN, "Dispatched": ACCENT, "Delivered": OK, "Closed": FAINT,
     "Cancelled": BAD,
+    # loading states / damaged returns
+    "waiting_arm": INFO, "scanning": WARN, "verified": OK, "wrong_pick": BAD, "departing": ACCENT,
+    "pending": WARN, "returned": OK,
     # AGV states
     "IDLE": OK, "RECEIVING_TASK": INFO, "NAVIGATING": ACCENT, "RETURNING": ACCENT, "ARRIVED": OK,
-    "OBSTACLE_WAIT": WARN, "REROUTING": WARN, "FAULT": BAD, "E_STOP": BAD, "MANUAL": INFO, "OFFLINE": FAINT,
+    "OBSTACLE_WAIT": WARN, "REROUTING": WARN, "FAULT": BAD, "E_STOP": BAD, "MANUAL": WARN, "OFFLINE": FAINT,
+    "LOADING": WARN, "DOCKING": ACCENT,
     # part status / discrepancy kinds
     "Active": OK, "Inactive": FAINT, "Discontinued": BAD, "Damaged": WARN, "Missing": BAD,
 }

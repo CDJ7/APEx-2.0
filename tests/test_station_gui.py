@@ -67,9 +67,23 @@ def test_gui_order_and_receive_flow(app, tmp_path, monkeypatch):
     orders = core.orders.list()
     assert len(orders) == 1 and orders[0]["line_count"] == 2 and orders[0]["destination"] == "WS2"
 
-    # --- deliver and receive it through the receiving page with one damaged item
+    # --- load it at the home station: KUKA arm + QR scans (typed into the Loading tab) + PLC permit
     oid = orders[0]["id"]
-    core.dispatch_order(oid)
+    core.dispatch_order(oid)                                # loading enabled -> starts loading
+    assert core.orders.get(oid)["status"] == "Loading"
+    load = page.loading
+    app.processEvents()
+    assert load.bins_model.rowCount() == 2
+    for code in ["APEX:NUT-M8"] * 7 + ["APEX:BLT-M8x25"]:
+        load.code.setText(code)
+        load.manual_scan()
+    app.processEvents()
+    assert core.loading.active.verified and "Right part" in load.scan_big.text()
+    core.grant_departure("plc", "plc:test")
+    core._try_auto_dispatch()
+    assert core.orders.get(oid)["status"] == "Dispatched"
+
+    # --- deliver and receive it through the receiving page with one damaged item
     core.bus.publish("agv_event", {"kind": "arrived", "order_id": oid, "destination": "WS2"})
     app.processEvents()
     rec = win.pages[[n for n, _ in NAV].index("Receiving")].receive
@@ -82,4 +96,9 @@ def test_gui_order_and_receive_flow(app, tmp_path, monkeypatch):
     rec.submit()
     assert core.orders.get(oid)["status"] == "Closed"
     assert len(core.orders.discrepancies()) == 1
+    disc = win.pages[[n for n, _ in NAV].index("Receiving")].disc
+    disc.refresh()
+    disc.table.selectRow(0)
+    disc.book_return()                                       # damaged unit back at the home station
+    assert sum(p["damaged_qty"] for p in core.inventory.list_parts()) == 1
     win.hide()

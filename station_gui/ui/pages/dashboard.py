@@ -101,14 +101,18 @@ class DashboardPage(Page):
 
     def refresh_kpis(self) -> None:
         k = self.ctx.core.kpis()
-        self.k_parts.set(k["total_parts"], f"{k['total_units']:,} units on hand", theme.TEXT)
+        self.k_parts.set(k["total_parts"], f"{k['total_units']:,} on hand · {k['damaged_units']} damaged", theme.TEXT)
         low_color = theme.BAD if k["out_of_stock"] else (theme.WARN if k["low_stock"] else theme.OK)
         self.k_low.set(k["low_stock"], f"{k['out_of_stock']} out of stock", low_color)
-        self.k_orders.set(k["open_orders"], f"{k['pending_dispatch']} waiting · {k['in_transit']} in transit · "
+        self.k_orders.set(k["open_orders"], f"{k['pending_dispatch']} waiting · {k['loading']} loading · "
+                                            f"{k['in_transit']} in transit · "
                                             f"{k['awaiting_receipt']} to receive",
                           theme.ACCENT if k["open_orders"] else theme.TEXT)
         st = k["agv_state"]
-        self.k_agv.set(st.replace("_", " "), "online" if k["agv_online"] else "no telemetry",
+        tel = self.ctx.core.agv.telemetry or {}
+        sub = ("docked · " if tel.get("docked") and k["agv_online"] else "") + \
+              ("online" if k["agv_online"] else "no telemetry")
+        self.k_agv.set(st.replace("_", " "), sub,
                        theme.STATUS_COLORS.get(st, theme.FAINT))
 
     def _telemetry(self, tel: dict) -> None:
@@ -117,12 +121,16 @@ class DashboardPage(Page):
         state = tel.get("state", "OFFLINE")
         self.state_chip.set(state)
         self.conn.set_state(theme.OK, "Connected" + (" · SIM" if tel.get("simulation") else ""))
-        if tel.get("order_id"):
+        if tel.get("loading_order_id"):
+            self.lbl_task.setText(f"Loading order #{tel['loading_order_id']}")
+        elif tel.get("manual"):
+            self.lbl_task.setText("Manual RC control")
+        elif tel.get("order_id"):
             self.lbl_task.setText(f"Order #{tel['order_id']} → {tel.get('destination')}")
         elif tel.get("destination"):
             self.lbl_task.setText(f"Returning to {tel['destination']}")
         else:
-            self.lbl_task.setText("No active task")
+            self.lbl_task.setText("Docked — waiting for a request" if tel.get("docked") else "No active task")
         pct = tel.get("battery_pct")
         self.batt.setValue(int(pct) if pct is not None else 0)
         self.batt.setFormat(f"{pct:.0f} %" if pct is not None else "n/a")
@@ -157,7 +165,8 @@ class DashboardPage(Page):
             return
         color = {"fault": theme.BAD, "estop": theme.BAD, "segment_blocked": theme.WARN, "reroute_failed": theme.BAD,
                  "obstacle_detected": theme.WARN, "arrived": theme.OK, "returned_home": theme.OK,
-                 "rerouting": theme.INFO}.get(kind, theme.TEXT)
+                 "rerouting": theme.INFO, "docked": theme.OK, "manual_mode": theme.WARN, "link_lost": theme.BAD,
+                 "task_failed": theme.BAD, "dock_failed": theme.WARN}.get(kind, theme.TEXT)
         self._add_activity(f"AGV · {ev.get('message', kind)}", color)
 
     def _remote(self, rc: dict) -> None:

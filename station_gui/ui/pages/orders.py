@@ -33,7 +33,7 @@ class NewOrderTab(QWidget):
         self.search.textChanged.connect(self.refresh)
         pick.body.addWidget(self.search)
         self.parts_model = DictTableModel(
-            [("part_number", "Part #"), ("name", "Name"), ("location", "Bin"), ("quantity", "Available")],
+            [("part_number", "Part #"), ("name", "Name"), ("location", "Location"), ("quantity", "Available")],
             row_color=lambda r: theme.BAD if r["quantity"] == 0 else (theme.WARN if r["low_stock"] else None))
         self.parts = make_table(self.parts_model, stretch="name")
         self.parts.doubleClicked.connect(lambda _i: self.add_selected())
@@ -108,6 +108,10 @@ class NewOrderTab(QWidget):
         if not row:
             self.ctx.toast("info", "Select a part to add")
             return
+        if row["id"] not in self.cart and len(self.cart) >= self.ctx.core.max_lines:
+            self.ctx.toast("warning", f"At most {self.ctx.core.max_lines} different parts per order "
+                                      "(one per AGV bin)")
+            return
         item = self.cart.setdefault(row["id"], {"part": row, "qty": 0})
         item["qty"] += self.qty.value()
         self.qty.setValue(1)
@@ -142,7 +146,7 @@ class NewOrderTab(QWidget):
         if not self.cart:
             self.summary.setText("Cart is empty — pick parts on the left")
         else:
-            self.summary.setText(f"{len(self.cart)} line(s) · {units} unit(s)" +
+            self.summary.setText(f"{len(self.cart)}/{self.ctx.core.max_lines} bins · {units} unit(s)" +
                                  (f"  ·  ⚠ {short} line(s) exceed available stock" if short else ""))
         self.submit_btn.setEnabled(bool(self.cart) and short == 0)
 
@@ -221,12 +225,14 @@ class HistoryTab(QWidget):
         self.d_info.setWordWrap(True)
         right.body.addWidget(self.d_info)
         self.lines_model = DictTableModel(
-            [("part_number", "Part #"), ("part_name", "Name"), ("qty_ordered", "Ordered"), ("qty_ok", "OK"),
-             ("qty_damaged", "Damaged"), ("qty_missing", "Missing")])
+            [("bin", "Bin"), ("part_number", "Part #"), ("part_name", "Name"), ("qty_ordered", "Ordered"),
+             ("qty_scanned", "Scanned"), ("qty_ok", "OK"), ("qty_damaged", "Damaged"), ("qty_missing", "Missing")])
         self.lines = make_table(self.lines_model, stretch="part_name")
         right.body.addWidget(self.lines, 1)
         self.b_approve = button("Approve", slot=self.approve)
-        self.b_dispatch = button("Dispatch now", "primary", self.dispatch)
+        self.b_dispatch = button("Load / dispatch", "primary", self.dispatch)
+        self.b_dispatch.setToolTip("Approved: start loading at the home station (or dispatch directly when "
+                                   "loading is disabled). Loading: depart now (override).")
         self.b_cancel = button("Cancel order", "danger", self.cancel)
         right.body.addLayout(hbox(self.b_approve, self.b_dispatch, None, self.b_cancel))
         split.addWidget(right)
@@ -263,12 +269,15 @@ class HistoryTab(QWidget):
         self.d_title.setText(f"Order #{order['id']} → {order['destination']}")
         self.d_chip.set(order["status"])
         times = [f"{k.replace('_at', '').title()}: {order[k][11:16]}" for k in
-                 ("created_at", "approved_at", "dispatched_at", "delivered_at", "closed_at", "cancelled_at") if order[k]]
+                 ("created_at", "approved_at", "loading_started_at", "departure_permit_at", "dispatched_at",
+                  "delivered_at", "closed_at", "cancelled_at") if order.get(k)]
         info = f"Requested by {order['requester']} via {order['source']}  ·  " + "  ·  ".join(times)
         if order["notes"]:
             info += f"\nNotes: {order['notes']}"
         if order["last_error"]:
             info += f"\n⚠ {order['last_error']}"
+        if order.get("result"):
+            info += f"\nResult: {order['result']}"
         if order["receive_notes"]:
             info += f"\nReceiving: {order['receive_notes']}"
         self.d_info.setText(info)
@@ -277,9 +286,9 @@ class HistoryTab(QWidget):
 
     def _set_actions(self, status: str | None) -> None:
         self.b_approve.setEnabled(status == OrderStatus.PENDING.value)
-        self.b_dispatch.setEnabled(status == OrderStatus.APPROVED.value)
+        self.b_dispatch.setEnabled(status in (OrderStatus.APPROVED.value, OrderStatus.LOADING.value))
         self.b_cancel.setEnabled(status in (OrderStatus.PENDING.value, OrderStatus.APPROVED.value,
-                                            OrderStatus.DISPATCHED.value))
+                                            OrderStatus.LOADING.value, OrderStatus.DISPATCHED.value))
 
     def approve(self) -> None:
         if self._current:
@@ -295,8 +304,9 @@ class HistoryTab(QWidget):
         self.b_dispatch.setEnabled(False)
 
         def done(ack):
+            what = "loading started" if ack.get("loading") else "dispatched"
             self.ctx.toast("success" if ack.get("ok") else "warning",
-                           f"Order #{oid}: " + ("dispatched" if ack.get("ok") else f"not dispatched — {ack.get('error')}"))
+                           f"Order #{oid}: " + (what if ack.get("ok") else f"not dispatched — {ack.get('error')}"))
             self.refresh()
 
         run_in_background(lambda: self.ctx.core.dispatch_order(oid, self.ctx.operator), done,
@@ -316,6 +326,136 @@ class HistoryTab(QWidget):
                           lambda e: error(self, "Cancel", e))
 
 
+SCAN_TEXT = {"ok": "Right part", "wrong_part": "WRONG PART", "over_quantity": "TOO MANY", "unknown_code": "UNKNOWN CODE",
+             "no_active_load": "No load active", "none": "Waiting for first scan"}
+LOAD_TEXT = {"none": "No order is being loaded", "waiting_arm": "Waiting for the KUKA arm / first scan",
+             "scanning": "Scanning — load in progress", "verified": "Load verified — waiting for PLC departure permit",
+             "wrong_pick": "Wrong pick — remove the part, then continue", "departing": "Departing"}
+
+
+class LoadingTab(QWidget):
+    """Home station: KUKA arm loads the AGV bins, the flexbase phone verifies each part by QR code."""
+
+    def __init__(self, ctx: AppContext):
+        super().__init__()
+        self.ctx = ctx
+        split = QSplitter(Qt.Horizontal)
+
+        left = Card("Current load")
+        self.title = QLabel("No order is being loaded")
+        self.title.setObjectName("Big")
+        self.chip = Chip("")
+        left.body.addLayout(hbox(self.title, None, self.chip))
+        self.info = muted("")
+        self.info.setWordWrap(True)
+        left.body.addWidget(self.info)
+        self.bins_model = DictTableModel(
+            [("bin", "AGV bin"), ("part_number", "Part #"), ("part_name", "Name"), ("qty", "Qty"),
+             ("scanned", "Scanned (QR)")],
+            row_color=lambda r: theme.OK if r["scanned"] >= r["qty"] else None)
+        self.bins = make_table(self.bins_model, stretch="part_name")
+        left.body.addWidget(self.bins, 1)
+        self.b_start = button("Start loading next order", "primary", self.start)
+        self.b_clear = button("Wrong part removed", slot=self.clear_wrong)
+        self.b_override = button("Depart now (override)", slot=self.override,
+                                 tip="Supervisor override: dispatch without a complete QR check / PLC permit")
+        self.b_abort = button("Abort loading", "danger", self.abort)
+        left.body.addLayout(hbox(self.b_start, self.b_clear, None, self.b_override, self.b_abort))
+        split.addWidget(left)
+
+        right = Card("Phone QR scanner")
+        self.scan_big = QLabel("—")
+        self.scan_big.setObjectName("Big")
+        self.scan_big.setAlignment(Qt.AlignCenter)
+        self.scan_big.setMinimumHeight(70)
+        right.body.addWidget(self.scan_big)
+        self.scan_detail = muted("")
+        self.scan_detail.setWordWrap(True)
+        self.scan_detail.setAlignment(Qt.AlignCenter)
+        right.body.addWidget(self.scan_detail)
+        right.body.addWidget(section("Manual entry / USB scanner"))
+        self.code = QLineEdit()
+        self.code.setPlaceholderText("APEX:<part number>  ↵")
+        self.code.returnPressed.connect(self.manual_scan)
+        right.body.addWidget(self.code)
+        right.body.addWidget(section("Wrong picks this load"))
+        self.wrong = muted("none")
+        self.wrong.setWordWrap(True)
+        right.body.addWidget(self.wrong)
+        hint = muted("The phone in the flexbase sends each scan to  /api/scan  (see docs/PROTOCOL.md). "
+                     "The PLC reads the bin table from Modbus registers 41–68 and grants departure "
+                     "with DEPART_PERMIT when the arm is clear.")
+        hint.setWordWrap(True)
+        right.body.addStretch(1)
+        right.body.addWidget(hint)
+        split.addWidget(right)
+        split.setSizes([700, 400])
+        self.setLayout(vbox(split, margins=(0, 12, 0, 0)))
+        ctx.bridge.loading.connect(self.show)
+        ctx.bridge.orders_changed.connect(self.refresh)
+
+    def refresh(self) -> None:
+        self.show(self.ctx.core.loading.snapshot())
+
+    def show(self, snap: dict) -> None:  # noqa: A003 - Qt-style slot name
+        state = snap.get("state", "none")
+        oid = snap.get("order_id")
+        self.title.setText(f"Order #{oid} → {snap.get('destination')}" if oid else "No order is being loaded")
+        self.chip.set(state if oid else "")
+        flags = []
+        if oid:
+            flags.append("QR check complete" if snap.get("verified") else "QR check pending")
+            flags.append("PLC permit received" if snap.get("permit") else "waiting for PLC permit")
+            if snap.get("override"):
+                flags.append("OVERRIDE")
+            flags.append(f"{snap.get('elapsed_s', 0):.0f} s")
+        self.info.setText(LOAD_TEXT.get(state, state) + ("  ·  " + "  ·  ".join(flags) if flags else ""))
+        self.bins_model.set_rows(snap.get("lines", []))
+        ls = snap.get("last_scan") or {}
+        res = ls.get("result", "none")
+        self.scan_big.setText(SCAN_TEXT.get(res, res))
+        colour = {"ok": theme.OK, "none": theme.FAINT, "no_active_load": theme.WARN}.get(res, theme.BAD)
+        self.scan_big.setStyleSheet(f"color: {colour};")
+        self.scan_detail.setText(f"{ls.get('detail', '')}  {(ls.get('ts') or '')[11:19]}")
+        self.wrong.setText("<br>".join(snap.get("wrong_picks", [])[-6:]) or "none")
+        has = oid is not None
+        tel = self.ctx.core.agv.telemetry or {}
+        self.b_start.setEnabled(not has and tel.get("state") == "IDLE" and bool(tel.get("docked")))
+        self.b_clear.setEnabled(state == "wrong_pick")
+        self.b_override.setEnabled(has and state != "departing")
+        self.b_abort.setEnabled(has and state != "departing")
+
+    def start(self) -> None:
+        run_in_background(lambda: self.ctx.core.start_loading(None, self.ctx.operator),
+                          lambda s: self.ctx.toast("info", f"Loading order #{s['order_id']}"),
+                          lambda e: error(self, "Start loading", e))
+
+    def clear_wrong(self) -> None:
+        self.ctx.core.clear_wrong_pick(self.ctx.operator)
+
+    def manual_scan(self) -> None:
+        code = self.code.text().strip()
+        self.code.clear()
+        if code:
+            self.ctx.core.scan_code(code, "station", "gui")
+
+    def override(self) -> None:
+        snap = self.ctx.core.loading.snapshot()
+        if not confirm(self, "Depart now", f"Send order <b>#{snap['order_id']}</b> without a complete QR check "
+                                           "or PLC permit?<br><br>Make sure the KUKA arm is clear of the AGV."):
+            return
+        run_in_background(lambda: self.ctx.core.dispatch_order(snap["order_id"], self.ctx.operator),
+                          lambda a: self.ctx.toast("success" if a.get("ok") else "warning",
+                                                   "Dispatched" if a.get("ok") else f"Not dispatched: {a.get('error')}"),
+                          lambda e: error(self, "Depart now", e))
+
+    def abort(self) -> None:
+        if confirm(self, "Abort loading", "Abort loading? The order goes back to Approved and the bins must be "
+                                          "emptied by hand."):
+            run_in_background(lambda: self.ctx.core.abort_loading("aborted by operator", self.ctx.operator),
+                              None, lambda e: error(self, "Abort", e))
+
+
 class OrdersPage(Page):
     title = "Orders"
     subtitle = "Build multi-part orders and follow them from approval to delivery"
@@ -325,10 +465,13 @@ class OrdersPage(Page):
         self.tabs = QTabWidget()
         self.new = NewOrderTab(ctx)
         self.history = HistoryTab(ctx)
+        self.loading = LoadingTab(ctx)
         self.tabs.addTab(self.new, "New order")
+        self.tabs.addTab(self.loading, "Loading (home station)")
         self.tabs.addTab(self.history, "Order history")
         self.root.addWidget(self.tabs, 1)
 
     def refresh(self) -> None:
         self.new.refresh()
+        self.loading.refresh()
         self.history.refresh()

@@ -50,7 +50,8 @@ class AgvStatusPage(Page):
         g = QGridLayout()
         g.setVerticalSpacing(6)
         self.v = {}
-        for r, key in enumerate(("Task", "Route", "Position", "Speed", "Localised", "Uptime")):
+        for r, key in enumerate(("Task", "Route", "Position", "Speed", "Localised", "Dock (Hall)", "RC (Flysky)",
+                                 "Return bin", "Station link", "Uptime")):
             g.addWidget(muted(key), r, 0)
             lbl = QLabel("—")
             lbl.setWordWrap(True)
@@ -95,7 +96,9 @@ class AgvStatusPage(Page):
         self.b_home = button("Return home", slot=self.cmd_home)
         ctl.body.addLayout(hbox(self.b_release, self.b_home))
         self.b_clear = button("Clear blocked segments", slot=self.cmd_clear)
-        ctl.body.addWidget(self.b_clear)
+        self.b_discharge = button("Empty return bin", slot=self.cmd_discharge,
+                                  tip="Tip the return bin with the linear actuator (AGV must be docked)")
+        ctl.body.addLayout(hbox(self.b_clear, self.b_discharge))
         side_lay.addWidget(ctl)
 
         # ---- simulation tools
@@ -106,6 +109,7 @@ class AgvStatusPage(Page):
         self.sim_card.body.addWidget(self.sim_kind)
         self.sim_card.body.addLayout(hbox(button("Remove obstacles", slot=self.sim_clear),
                                           button("HW E-stop", "danger", self.sim_estop_toggle)))
+        self.sim_card.body.addWidget(button("Toggle RC manual override", slot=self.sim_rc_toggle))
         self.sim_card.setVisible(False)
         side_lay.addWidget(self.sim_card)
         side_lay.addStretch(1)
@@ -115,6 +119,7 @@ class AgvStatusPage(Page):
         b.agv_map.connect(self.map.set_map)
         self.map.clicked.connect(self.on_map_click)
         self._sim_estop = False
+        self._sim_rc = False
         self._last = 0.0
         if ctx.core.agv.map:
             self.map.set_map(ctx.core.agv.map)
@@ -139,6 +144,15 @@ class AgvStatusPage(Page):
         self.v["Speed"].setText(f"{t.get('speed_mps', 0):.2f} m/s" + ("  · PAUSED" if t.get("paused") else ""))
         self.v["Localised"].setText("yes" if t.get("localized") else "NO")
         self.v["Localised"].setStyleSheet("" if t.get("localized") else f"color: {theme.BAD};")
+        self.v["Dock (Hall)"].setText("docked — charge / wait position" if t.get("docked") else "not docked")
+        self.v["RC (Flysky)"].setText("MANUAL override active" if t.get("manual") else "autonomous")
+        self.v["RC (Flysky)"].setStyleSheet(f"color: {theme.WARN};" if t.get("manual") else "")
+        act = t.get("actuator", 0)
+        self.v["Return bin"].setText({1: "tipping (extending)", -1: "retracting"}.get(act, "home"))
+        self.v["Station link"].setText("LOST — motion held" if t.get("link_hold") else "ok")
+        self.v["Station link"].setStyleSheet(f"color: {theme.BAD};" if t.get("link_hold") else "")
+        if t.get("loading_order_id"):
+            self.v["Task"].setText(f"Loading order #{t['loading_order_id']} (KUKA arm)")
         self.v["Uptime"].setText(f"{t.get('uptime_s', 0) / 60:.1f} min")
         pct = t.get("battery_pct")
         self.batt.setValue(int(pct or 0))
@@ -172,6 +186,7 @@ class AgvStatusPage(Page):
         self.blocked.setText("Blocked segments: " + (", ".join(f"{a}–{b}" for a, b in be) if be else "none"))
         self.b_release.setEnabled(state == "ARRIVED")
         self.b_resume.setEnabled(bool(t.get("paused")))
+        self.b_discharge.setEnabled(bool(t.get("docked")) and state in ("IDLE", "LOADING") and not act)
 
     def refresh(self) -> None:
         if self.ctx.core.agv.telemetry:
@@ -198,6 +213,10 @@ class AgvStatusPage(Page):
         if confirm(self, "Return home", "Abort the current task (if any) and send the AGV to the main station?"):
             self.cmd("return_home")
 
+    def cmd_discharge(self) -> None:
+        if confirm(self, "Empty return bin", "Tip the AGV's return bin into the home-station tote?", danger=False):
+            self.cmd("discharge")
+
     def cmd_clear(self) -> None:
         if confirm(self, "Clear blocked segments", "Mark ALL blocked route segments as passable again?\n"
                                                    "Only do this once the obstruction has been removed."):
@@ -217,6 +236,11 @@ class AgvStatusPage(Page):
 
     def sim_clear(self) -> None:
         self.cmd("sim", {"action": "remove"}, quiet=True)
+
+    def sim_rc_toggle(self) -> None:
+        self._sim_rc = not self._sim_rc
+        self.cmd("sim", {"action": "rc_manual", "on": self._sim_rc}, quiet=True)
+        self.ctx.toast("warning", "Simulated Flysky override " + ("ON" if self._sim_rc else "OFF"))
 
     def sim_estop_toggle(self) -> None:
         self._sim_estop = not self._sim_estop

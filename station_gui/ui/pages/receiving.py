@@ -199,11 +199,15 @@ class DiscrepancyTab(QWidget):
         self.model = DictTableModel(
             [("id", "ID"), ("created_at", "Reported"), ("order_id", "Order"), ("destination", "Station"),
              ("part_number", "Part #"), ("part_name", "Name"), ("kind", "Type"), ("quantity", "Qty"),
-             ("notes", "Notes"), ("reported_by", "By"), ("resolution", "Resolution")],
+             ("return_status", "Return"), ("notes", "Notes"), ("reported_by", "By"), ("resolution", "Resolution")],
             row_color=lambda r: theme.FAINT if r["resolved"] else None,
             formatters={"created_at": lambda v: (v or "")[:16].replace("T", " ")})
-        self.table = make_table(self.model, status_columns=["kind"], stretch="notes")
-        card.body.addLayout(hbox(self.open_only, None, button("Mark resolved…", slot=self.resolve),
+        self.table = make_table(self.model, status_columns=["kind", "return_status"], stretch="notes")
+        card.body.addLayout(hbox(self.open_only, None,
+                                 button("Book return", slot=self.book_return,
+                                        tip="Damaged part is back at the home station: add it to the damaged "
+                                            "inventory (normally automatic when the AGV docks)"),
+                                 button("Mark resolved…", slot=self.resolve),
                                  button("Export CSV", slot=self.export)))
         card.body.addWidget(self.table, 1)
         self.summary = muted("")
@@ -216,7 +220,19 @@ class DiscrepancyTab(QWidget):
         self.model.set_rows(rows)
         dmg = sum(r["quantity"] for r in rows if r["kind"] == "Damaged")
         mis = sum(r["quantity"] for r in rows if r["kind"] == "Missing")
-        self.summary.setText(f"{len(rows)} record(s) · {dmg} damaged · {mis} missing")
+        pend = sum(r["quantity"] for r in rows if r.get("return_status") == "pending")
+        self.summary.setText(f"{len(rows)} record(s) · {dmg} damaged · {mis} missing · "
+                             f"{pend} damaged unit(s) on the way back to the home station")
+
+    def book_return(self) -> None:
+        row = selected_row(self.table)
+        if not row or row.get("return_status") != "pending":
+            self.ctx.toast("info", "Select a damaged item whose return is pending")
+            return
+        try:
+            self.ctx.core.book_return(row["id"], self.ctx.operator)
+        except ValidationError as exc:
+            error(self, "Book return", str(exc))
 
     def resolve(self) -> None:
         row = selected_row(self.table)

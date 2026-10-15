@@ -31,6 +31,7 @@ class QtBridge(QObject):
     orders_changed = Signal()
     remote_command = Signal(dict)
     plc_status = Signal(dict)
+    loading = Signal(dict)                    # home-station loading snapshot (KUKA + phone QR)
     notify = Signal(str, str)                 # level, text
     log_record = Signal(str, str)             # level, formatted line
 
@@ -53,6 +54,8 @@ class QtBridge(QObject):
             self.orders_changed.emit()
         elif topic == "remote_command":
             self.remote_command.emit(payload)
+        elif topic == "loading":
+            self.loading.emit(payload)
         elif topic == "plc":
             self.plc_status.emit(payload)
         elif topic == "notify":
