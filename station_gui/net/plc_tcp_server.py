@@ -16,7 +16,8 @@ Handshake, then request/response - one JSON object per line::
 Commands: ``status``, ``create_order``, ``approve_order``, ``cancel_order``,
 ``dispatch_next``, ``dispatch_order``, ``get_order``, ``list_orders``,
 ``estop``, ``reset``, ``pause``, ``resume``, ``return_home``, ``release``,
-``clear_blocked``. Errors: ``{"ok": false, "error": "..."}``.
+``clear_blocked``, ``discharge``; home-station loading: ``loading`` (state +
+bin table), ``start_loading``, ``depart_permit``, ``load_abort``. Errors: ``{"ok": false, "error": "..."}``.
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ from station_gui.core.station import StationCore
 log = logging.getLogger("station.plc_tcp")
 
 MAX_LINE = 16_384
-AGV_CMDS = {"estop", "reset", "pause", "resume", "return_home", "release", "clear_blocked"}
+AGV_CMDS = {"estop", "reset", "pause", "resume", "return_home", "release", "clear_blocked", "discharge"}
 
 
 def status_snapshot(core: StationCore) -> dict[str, Any]:
@@ -46,6 +47,9 @@ def status_snapshot(core: StationCore) -> dict[str, Any]:
         "faults": tel.get("faults", []), "estop": tel.get("estop", False), "obstacle": tel.get("obstacle"),
         "blocked_edges": tel.get("blocked_edges", []), "open_orders": k["open_orders"],
         "pending_dispatch": k["pending_dispatch"], "low_stock": k["low_stock"],
+        "docked": tel.get("docked", False), "manual": tel.get("manual", False),
+        "loading": core.loading.snapshot(), "pending_returns": k["pending_returns"],
+        "damaged_units": k["damaged_units"],
     }
 
 
@@ -133,6 +137,16 @@ class PlcJsonServer:
             if cmd in ("dispatch_next", "dispatch_order"):
                 ack = core.dispatch_order(int(args["order_id"]) if cmd == "dispatch_order" else None, "plc", src)
                 return {"ok": bool(ack.get("ok")), "error": ack.get("error"), "result": ack}
+            if cmd == "loading":
+                return {"ok": True, "result": core.loading.snapshot()}
+            if cmd == "start_loading":
+                oid = args.get("order_id")
+                return {"ok": True, "result": core.start_loading(int(oid) if oid else None, "plc", src)}
+            if cmd == "depart_permit":
+                return {"ok": True, "result": core.grant_departure("plc", src)}
+            if cmd == "load_abort":
+                core.abort_loading(str(args.get("reason", "aborted by PLC")), "plc", src)
+                return {"ok": True, "result": {}}
             if cmd == "get_order":
                 o = core.orders.get(int(args["order_id"]))
                 return {"ok": o is not None, "result": o, "error": None if o else "not found"}

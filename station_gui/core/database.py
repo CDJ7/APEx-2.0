@@ -20,7 +20,7 @@ from typing import Any, Iterator
 
 log = logging.getLogger("station.db")
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS parts (
@@ -107,7 +107,32 @@ CREATE TABLE IF NOT EXISTS agv_events (
 );
 
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+
+-- every QR scan from the phone at the home station (load verification)
+CREATE TABLE IF NOT EXISTS scan_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          TEXT NOT NULL,
+    code        TEXT NOT NULL,
+    part_number TEXT NOT NULL DEFAULT '',
+    device      TEXT NOT NULL DEFAULT '',
+    source      TEXT NOT NULL DEFAULT '',
+    order_id    INTEGER,
+    result      TEXT NOT NULL,          -- ok | wrong_part | over_quantity | unknown_code | no_active_load
+    detail      TEXT NOT NULL DEFAULT ''
+);
 """
+
+# Columns added after schema version 1 (applied to existing databases on start-up).
+MIGRATIONS: list[tuple[str, str, str]] = [
+    ("parts", "damaged_qty", "INTEGER NOT NULL DEFAULT 0"),          # damaged parts returned to home
+    ("order_lines", "bin", "INTEGER"),                               # AGV tray bin 1..6
+    ("order_lines", "qty_scanned", "INTEGER NOT NULL DEFAULT 0"),    # phone QR scans at loading
+    ("orders", "result", "TEXT NOT NULL DEFAULT ''"),                # task completion result
+    ("orders", "loading_started_at", "TEXT"),
+    ("orders", "departure_permit_at", "TEXT"),
+    ("discrepancies", "return_status", "TEXT NOT NULL DEFAULT ''"),  # '' | pending | returned
+    ("discrepancies", "returned_at", "TEXT"),
+]
 
 
 def now_iso() -> str:
@@ -130,9 +155,19 @@ class Database:
             if self.path != ":memory:":
                 self._conn.execute("PRAGMA journal_mode = WAL")
             self._conn.executescript(SCHEMA)
+            self._migrate()
             self._conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)",
                                (str(SCHEMA_VERSION),))
         log.info("database ready path=%s", self.path)
+
+    def _migrate(self) -> None:
+        for table, column, decl in MIGRATIONS:
+            cols = {r[1] for r in self._conn.execute(f"PRAGMA table_info({table})")}
+            if column not in cols:
+                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+                log.info("database migrated: %s.%s added", table, column)
+        self._conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)",
+                           (str(SCHEMA_VERSION),))
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:

@@ -27,7 +27,7 @@ from typing import Callable
 
 from common.config import Config
 from common.protocol.modbus_map import (
-    PLC_WRITABLE, REGISTER_COUNT, Cmd, EventCode, Reg, Result, to_int16, to_uint16,
+    LOAD_BINS, PLC_WRITABLE, REGISTER_COUNT, Cmd, EventCode, Reg, Result, bin_reg, to_int16, to_uint16,
 )
 from common.protocol.states import AgvState, FaultCode, faults_to_word
 from station_gui.core.inventory import ValidationError
@@ -255,6 +255,20 @@ class PlcBridge:
         if cmd == Cmd.CANCEL_ORDER:
             core.cancel_order(a["ARG_ORDER_ID"], "cancelled by PLC", "plc", src)
             return Result.OK, a["ARG_ORDER_ID"], ""
+        if cmd == Cmd.DEPART_PERMIT:
+            snap = core.grant_departure("plc", src)
+            return Result.OK, snap.get("order_id") or 0, ""
+        if cmd == Cmd.LOAD_ABORT:
+            core.abort_loading("aborted by PLC", "plc", src)
+            return Result.OK, 0, ""
+        if cmd == Cmd.START_LOADING:
+            snap = core.start_loading(a["ARG_ORDER_ID"] or None, "plc", src)
+            return Result.OK, snap.get("order_id") or 0, ""
+        if cmd == Cmd.DISCHARGE:
+            if not core.agv.connected:
+                return Result.AGV_OFFLINE, 0, "AGV offline"
+            ack = core.discharge_returns("plc", src)
+            return (Result.OK if ack.get("ok") else Result.REJECTED), 0, ack.get("error", "")
         if cmd in (Cmd.DISPATCH_NEXT, Cmd.DISPATCH_ORDER):
             if not core.agv.online:
                 return Result.AGV_OFFLINE, 0, "AGV offline"
@@ -270,8 +284,13 @@ class PlcBridge:
                 "arrived": EventCode.AGV_ARRIVED, "returned_home": EventCode.AGV_RETURNED_HOME,
                 "obstacle_detected": EventCode.OBSTACLE, "segment_blocked": EventCode.SEGMENT_BLOCKED,
                 "rerouting": EventCode.REROUTING, "fault": EventCode.FAULT, "estop": EventCode.ESTOP,
-                "task_accepted": EventCode.ORDER_DISPATCHED,
+                "task_accepted": EventCode.ORDER_DISPATCHED, "manual_mode": EventCode.MANUAL_MODE,
+                "docked": EventCode.DOCKED, "task_failed": EventCode.TASK_FAILED,
+                "discharge_done": EventCode.RETURNS_DISCHARGED,
             }.get(payload.get("kind"))
+        elif topic == "loading_event" and isinstance(payload, dict):
+            code = {"load_request": EventCode.LOADING_STARTED, "load_verified": EventCode.LOAD_VERIFIED,
+                    "wrong_pick": EventCode.WRONG_PICK}.get(payload.get("kind"))
         if code is not None:
             self._event_counter = (self._event_counter + 1) & 0xFFFF
             self.bank.set_many({Reg.LAST_EVENT_CODE: code, Reg.LAST_EVENT_COUNTER: self._event_counter})
@@ -308,7 +327,28 @@ class PlcBridge:
             Reg.LOW_STOCK_COUNT: to_uint16(k["low_stock"]),
             Reg.PLC_LINK_OK: int(self.plc_online),
             Reg.AGV_DEST_STATION_ID: core.plc_id_of(tel.get("destination")),
+            Reg.AGV_DOCKED: int(bool(online and tel.get("docked"))),
+            Reg.AGV_MANUAL: int(bool(online and tel.get("manual"))),
+            Reg.PENDING_RETURNS: to_uint16(k.get("pending_returns", 0)),
+            Reg.DAMAGED_UNITS: to_uint16(k.get("damaged_units", 0)),
         })
+        self._refresh_loading()
+
+    def _refresh_loading(self) -> None:
+        snap = self.core.loading.snapshot()
+        regs = {
+            Reg.LOAD_STATE: snap.get("state_code", 0), Reg.LOAD_ORDER_ID: to_uint16(snap.get("order_id") or 0),
+            Reg.LOAD_SEQ: to_uint16(snap.get("seq", 0)), Reg.LOAD_LINE_COUNT: len(snap.get("lines", [])),
+            Reg.LAST_SCAN_RESULT: snap["last_scan"].get("result_code", 0),
+            Reg.SCAN_COUNTER: to_uint16(snap.get("scan_counter", 0)),
+        }
+        by_bin = {int(ln["bin"]): ln for ln in snap.get("lines", []) if ln.get("bin")}
+        for b in range(1, LOAD_BINS + 1):
+            ln = by_bin.get(b)
+            regs[bin_reg(b, 0)] = to_uint16(ln["part_id"]) if ln else 0
+            regs[bin_reg(b, 1)] = to_uint16(ln["qty"]) if ln else 0
+            regs[bin_reg(b, 2)] = to_uint16(ln["scanned"]) if ln else 0
+        self.bank.set_many(regs)
 
     def heartbeat(self) -> None:
         self.bank.set(Reg.STATION_HEARTBEAT, (self.bank.get(Reg.STATION_HEARTBEAT) + 1) & 0xFFFF)

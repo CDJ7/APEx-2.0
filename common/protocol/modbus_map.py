@@ -8,9 +8,23 @@ Roles
   writes the command block.
 
 All data are **holding registers** (function codes 03 read, 06/16 write).
-Addresses below are 0-based protocol addresses. In Allen-Bradley Micro800
-``MSG_MODBUS``/``MSG_MODBUS2`` blocks and in most PLC software they appear as
-``400001 + address`` (e.g. ``CMD_CODE`` = address 1 = ``400002``).
+Addresses below are 0-based protocol addresses. In most PLC software they
+appear as ``400001 + address`` (e.g. ``CMD_CODE`` = address 1 = ``400002``).
+
+The team's PLC is an Allen-Bradley CompactLogix 1769 system (the 1769-ECR in
+the report is the right end cap/terminator of the I/O bus; the controller
+catalog number is still TBD). CompactLogix has no native Modbus instruction:
+use Rockwell's *Modbus TCP Client* Add-On Instruction (socket based) on the
+controller's Ethernet port. See docs/PLC_INTEGRATION.md.
+
+Home-station loading (registers 41..68)
+---------------------------------------
+While an order is loaded the PLC reads ``LOAD_STATE`` and the bin table
+(part id + quantity per AGV bin) and drives the KUKA arm. The phone in the
+flexbase scans each part's QR code; results appear in ``LAST_SCAN_RESULT`` /
+``SCAN_COUNTER`` and the per-bin ``SCANNED`` counts. When the arm is clear the
+PLC sends ``Cmd.DEPART_PERMIT``; the station dispatches the AGV once the load
+is verified (``LOAD_STATE`` 3 -> 5).
 
 Command handshake (edge-triggered, idempotent)
 ----------------------------------------------
@@ -62,10 +76,25 @@ class Reg(IntEnum):
     LAST_EVENT_COUNTER = 38  # increments on every new event
     PLC_LINK_OK = 39       # 1 = station sees PLC heartbeat changing
     AGV_DEST_STATION_ID = 40
+    # ---------------- home-station loading (station -> PLC) ---------------
+    LOAD_STATE = 41        # 0 none, 1 waiting for arm, 2 scanning, 3 verified, 4 wrong pick, 5 departing
+    LOAD_ORDER_ID = 42     # order being loaded (0 = none)
+    LOAD_SEQ = 43          # increments for every new load request
+    LOAD_LINE_COUNT = 44   # number of bins used (1..6)
+    LAST_SCAN_RESULT = 45  # 0 none, 1 ok, 2 wrong part, 3 over quantity, 4 unknown code, 5 no active load
+    SCAN_COUNTER = 46      # increments on every phone scan
+    AGV_DOCKED = 47        # 1 = Hall sensor: AGV in the charge/wait position
+    AGV_MANUAL = 48        # 1 = Flysky RC override active
+    PENDING_RETURNS = 49   # damaged returns reported, not yet back at the home station
+    DAMAGED_UNITS = 50     # total units in the damaged inventory
+    LOAD_BIN_BASE = 51     # bin b (1..6): 51+3(b-1) part id, +1 qty ordered, +2 qty scanned  (51..68)
 
 
 #: Total number of holding registers exposed.
-REGISTER_COUNT = 50
+REGISTER_COUNT = 80
+#: Number of AGV bins in the loading table (= station.max_lines_per_order).
+LOAD_BINS = 6
+LOAD_BIN_STRIDE = 3
 #: Registers the PLC is allowed to write (writes elsewhere are rejected with exception 02).
 PLC_WRITABLE = range(Reg.PLC_HEARTBEAT, Reg.ARG_RESERVED + 1)
 
@@ -84,6 +113,10 @@ class Cmd(IntEnum):
     RELEASE = 10           # AGV leaves the destination after unloading
     CLEAR_BLOCKED = 11     # clear all blocked route segments
     APPROVE_ORDER = 12     # ARG_ORDER_ID
+    DEPART_PERMIT = 13     # KUKA arm clear: the loaded AGV may leave (once the QR check passed)
+    LOAD_ABORT = 14        # abandon the current load (order back to Approved)
+    START_LOADING = 15     # ARG_ORDER_ID (0 = next approved order); AGV must be docked + idle
+    DISCHARGE = 16         # tip the AGV's return bin (linear actuator) while docked
 
 
 class Result(IntEnum):
@@ -110,6 +143,20 @@ class EventCode(IntEnum):
     ORDER_CLOSED = 10
     ORDER_CANCELLED = 11
     LOW_STOCK = 12
+    LOADING_STARTED = 13
+    LOAD_VERIFIED = 14
+    WRONG_PICK = 15
+    MANUAL_MODE = 16
+    DOCKED = 17
+    TASK_FAILED = 18
+    RETURNS_DISCHARGED = 19
+
+
+def bin_reg(bin_no: int, field: int) -> int:
+    """Register of ``field`` (0 part id, 1 qty, 2 scanned) for AGV bin ``bin_no`` (1-based)."""
+    if not 1 <= bin_no <= LOAD_BINS or not 0 <= field < LOAD_BIN_STRIDE:
+        raise ValueError("bin 1..6, field 0..2")
+    return Reg.LOAD_BIN_BASE + LOAD_BIN_STRIDE * (bin_no - 1) + field
 
 
 def to_int16(value: int) -> int:

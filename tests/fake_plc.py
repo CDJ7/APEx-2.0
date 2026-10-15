@@ -8,6 +8,7 @@ handshake from ``common/protocol/modbus_map.py``::
     python -m tests.fake_plc --sim monitor              # live status + heartbeat (Ctrl+C)
     python -m tests.fake_plc --sim order --part 1 --qty 2 --station 2
     python -m tests.fake_plc --sim estop | reset | home | pause | resume | release | next
+    python -m tests.fake_plc --sim load | permit | abort-load | discharge   # home-station loading
     python -m tests.fake_plc --sim demo                 # scripted sequence
 
 TCP/JSON fallback mode (``plc.protocol: tcp_json``)::
@@ -25,11 +26,13 @@ import sys
 import time
 
 from common.config import load_config
-from common.protocol.modbus_map import Cmd, EventCode, Reg, Result, from_int16
+from common.protocol.modbus_map import LOAD_BINS, Cmd, EventCode, Reg, Result, bin_reg, from_int16
 from common.protocol.states import AgvState
 
 SIMPLE = {"estop": Cmd.ESTOP, "reset": Cmd.RESET, "home": Cmd.RETURN_HOME, "pause": Cmd.PAUSE,
-          "resume": Cmd.RESUME, "release": Cmd.RELEASE, "next": Cmd.DISPATCH_NEXT, "clear": Cmd.CLEAR_BLOCKED}
+          "resume": Cmd.RESUME, "release": Cmd.RELEASE, "next": Cmd.DISPATCH_NEXT, "clear": Cmd.CLEAR_BLOCKED,
+          "permit": Cmd.DEPART_PERMIT, "abort-load": Cmd.LOAD_ABORT, "load": Cmd.START_LOADING,
+          "discharge": Cmd.DISCHARGE}
 
 
 class ModbusPlc:
@@ -48,7 +51,7 @@ class ModbusPlc:
     def _kw(self) -> dict:
         return {"device_id": self.unit}
 
-    def read(self, start: int = 0, count: int = 41) -> list[int]:
+    def read(self, start: int = 0, count: int = 69) -> list[int]:
         try:
             rr = self.client.read_holding_registers(start, count=count, **self._kw())
         except TypeError:   # pymodbus < 3.9 used 'slave='
@@ -83,7 +86,7 @@ class ModbusPlc:
         raise TimeoutError("station did not acknowledge the command")
 
     def status(self) -> dict:
-        r = self.read(0, 41)
+        r = self.read(0, 69)
         return {
             "station_heartbeat": r[Reg.STATION_HEARTBEAT], "agv_connected": bool(r[Reg.AGV_CONNECTED]),
             "agv_state": AgvState.from_code(r[Reg.AGV_STATE]).value, "order_id": r[Reg.AGV_ORDER_ID],
@@ -95,6 +98,12 @@ class ModbusPlc:
             "last_event": EventCode(r[Reg.LAST_EVENT_CODE]).name if r[Reg.LAST_EVENT_CODE] in EventCode._value2member_map_
             else r[Reg.LAST_EVENT_CODE],
             "plc_link_ok": bool(r[Reg.PLC_LINK_OK]), "dest_station_id": r[Reg.AGV_DEST_STATION_ID],
+            "docked": bool(r[Reg.AGV_DOCKED]), "manual": bool(r[Reg.AGV_MANUAL]),
+            "load_state": r[Reg.LOAD_STATE], "load_order_id": r[Reg.LOAD_ORDER_ID], "load_seq": r[Reg.LOAD_SEQ],
+            "last_scan_result": r[Reg.LAST_SCAN_RESULT], "scan_counter": r[Reg.SCAN_COUNTER],
+            "pending_returns": r[Reg.PENDING_RETURNS], "damaged_units": r[Reg.DAMAGED_UNITS],
+            "bins": [{"bin": b, "part_id": r[bin_reg(b, 0)], "qty": r[bin_reg(b, 1)], "scanned": r[bin_reg(b, 2)]}
+                     for b in range(1, LOAD_BINS + 1) if r[bin_reg(b, 0)]],
         }
 
 

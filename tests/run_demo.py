@@ -2,11 +2,14 @@
 
     python -m tests.run_demo              # AGV sim + station GUI
     python -m tests.run_demo --headless   # AGV sim + station services only (REST/PLC/AGV link)
+    python -m tests.run_demo --cell       # ... plus the simulated home-station cell
+                                          #     (PLC + KUKA arm + phone QR scanner)
 
 Then, in other terminals:
 
     python -m tests.fake_laptop_client --sim order WS1 BRG-6204-2RS:2
     python -m tests.fake_plc --sim monitor
+    python -m tests.fake_station_cell --sim --wrong-pick 1   (if not started with --cell)
     python -m tests.sim_scenarios block            (stop auto-dispatch in the GUI first)
 
 Ctrl+C (or closing the GUI) stops everything.
@@ -27,6 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--headless", action="store_true")
+    ap.add_argument("--cell", action="store_true", help="also run tests.fake_station_cell (loading)")
     args = ap.parse_args()
     env = {**os.environ, "PYTHONPATH": str(ROOT)}
     procs = []
@@ -37,6 +41,11 @@ def main() -> int:
         station = "station_gui.server_main" if args.headless else "station_gui.app"
         print(f"starting {station} …")
         procs.append(subprocess.Popen([sys.executable, "-m", station, "--sim"], cwd=ROOT, env=env))
+        if args.cell:
+            time.sleep(4)
+            print("starting the home-station cell simulator (PLC + KUKA + phone) …")
+            procs.append(subprocess.Popen([sys.executable, "-m", "tests.fake_station_cell", "--sim"], cwd=ROOT,
+                                          env=env))
         while all(p.poll() is None for p in procs):
             time.sleep(0.5)
     except KeyboardInterrupt:

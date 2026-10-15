@@ -104,7 +104,8 @@ class InventoryService:
         row = self.db.query_one(
             "SELECT COUNT(*) AS skus, COALESCE(SUM(quantity),0) AS units, "
             "COALESCE(SUM(CASE WHEN quantity <= reorder_threshold AND status='Active' THEN 1 ELSE 0 END),0) AS low, "
-            "COALESCE(SUM(CASE WHEN quantity = 0 AND status='Active' THEN 1 ELSE 0 END),0) AS out_of_stock "
+            "COALESCE(SUM(CASE WHEN quantity = 0 AND status='Active' THEN 1 ELSE 0 END),0) AS out_of_stock, "
+            "COALESCE(SUM(damaged_qty),0) AS damaged "
             "FROM parts")
         return {k: int(v) for k, v in (row or {}).items()}
 
@@ -154,6 +155,20 @@ class InventoryService:
             c.execute("UPDATE parts SET quantity=?, updated_at=? WHERE id=?", (new, now_iso(), part_id))
             self.db.audit(actor, source, "part.adjust", "part", part_id,
                           {"delta": delta, "new_quantity": new, "reason": reason}, conn=c)
+        self._changed()
+        return self.get(part_id)  # type: ignore[return-value]
+
+    def dispose_damaged(self, part_id: int, qty: int, reason: str, actor: str = "operator",
+                        source: str = "gui") -> dict:
+        """Remove units from the damaged counter (scrapped / returned to the supplier)."""
+        with self.db.transaction() as c:
+            row = c.execute("SELECT damaged_qty FROM parts WHERE id=?", (part_id,)).fetchone()
+            if row is None:
+                raise ValidationError("Part not found")
+            if not 0 < qty <= row["damaged_qty"]:
+                raise ValidationError(f"Quantity must be 1..{row['damaged_qty']}")
+            c.execute("UPDATE parts SET damaged_qty = damaged_qty - ?, updated_at=? WHERE id=?", (qty, now_iso(), part_id))
+            self.db.audit(actor, source, "part.dispose_damaged", "part", part_id, {"qty": qty, "reason": reason}, conn=c)
         self._changed()
         return self.get(part_id)  # type: ignore[return-value]
 

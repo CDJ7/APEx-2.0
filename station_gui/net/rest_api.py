@@ -9,11 +9,24 @@ Security:
   every state-changing call is written to the audit log as ``rest:<ip>``.
 
 Interactive docs (Swagger UI) at ``http://<station>:8000/docs``.
+
+Phone QR scanner (home-station loading)
+---------------------------------------
+The phone mounted in the flexbase runs a QR scanner app that forwards each
+scan to the station. Two forms are accepted so most scanner apps work:
+
+* ``POST /api/scan`` with ``{"code": "APEX:BRG-6204-2RS", "device": "phone1"}``
+  and the ``X-API-Key`` header;
+* ``GET /api/scan?code=APEX:BRG-6204-2RS&key=<api_key>&device=phone1`` for
+  apps that can only open a URL with the scanned text appended. It answers
+  with a large, colour-coded page (green = right part, red = wrong) so the
+  result is visible on the phone too.
 """
 
 from __future__ import annotations
 
 import hmac
+from html import escape
 import logging
 import threading
 import time
@@ -21,7 +34,7 @@ from typing import Any, Literal
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Security
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
@@ -70,7 +83,19 @@ class AgvCommandIn(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict)
 
 
-AgvCommandName = Literal["estop", "reset", "pause", "resume", "return_home", "release", "clear_blocked"]
+class ScanIn(BaseModel):
+    code: str = Field(min_length=1, max_length=120)
+    device: str = Field(default="phone", max_length=40)
+
+
+class OverrideIn(BaseModel):
+    reason: str = Field(default="", max_length=300)
+
+
+AgvCommandName = Literal["estop", "reset", "pause", "resume", "return_home", "release", "clear_blocked",
+                         "discharge"]
+
+_SCAN_COLOURS = {"ok": "#1b873f", "no_active_load": "#9a6700"}
 
 
 # ------------------------------------------------------------------ app
@@ -163,6 +188,62 @@ def create_app(core: StationCore, cfg: Config) -> FastAPI:
     @app.get("/api/discrepancies")
     def discrepancies(resolved: bool | None = None, _src: str = Depends(auth)) -> list[dict]:
         return core.orders.discrepancies(resolved)
+
+    # -------------------------------------------------------------- loading / scanning
+    @app.post("/api/scan")
+    def scan(body: ScanIn, src: str = Depends(auth)) -> dict:
+        return core.scan_code(body.code, body.device, src)
+
+    @app.get("/api/scan", response_class=HTMLResponse)
+    def scan_get(request: Request, code: str = Query(min_length=1, max_length=120),
+                 key: str = Query("", max_length=200), device: str = Query("phone", max_length=40)) -> HTMLResponse:
+        ip = request.client.host if request.client else "?"
+        if not key or not hmac.compare_digest(key, api_key):
+            log.warning("REST scan auth failed ip=%s", ip)
+            raise HTTPException(status_code=401, detail="invalid or missing key")
+        res = core.scan_code(code, device, f"rest:{ip}")
+        colour = _SCAN_COLOURS.get(res["result"], "#cf222e")
+        title = "OK" if res["result"] == "ok" else res["result"].replace("_", " ").upper()
+        page = (f"<!doctype html><meta name=viewport content='width=device-width'><title>{title}</title>"
+                f"<body style='margin:0;font-family:sans-serif;background:{colour};color:#fff;text-align:center'>"
+                f"<h1 style='font-size:18vw;margin:20vh 0 4vh'>{title}</h1>"
+                f"<p style='font-size:6vw'>{escape(res.get('detail', ''))}</p></body>")
+        return HTMLResponse(page)
+
+    @app.get("/api/loading")
+    def loading(_src: str = Depends(auth)) -> dict:
+        return core.loading.snapshot()
+
+    @app.post("/api/loading/start")
+    def loading_start(order_id: int | None = None, src: str = Depends(auth)) -> dict:
+        return guard(core.start_loading, order_id, actor="laptop", source=src)
+
+    @app.post("/api/loading/permit")
+    def loading_permit(src: str = Depends(auth)) -> dict:
+        return guard(core.grant_departure, "laptop", src)
+
+    @app.post("/api/loading/override")
+    def loading_override(body: OverrideIn, src: str = Depends(auth)) -> dict:
+        core.db.audit("laptop", src, "loading.override_reason", "loading", "", body.reason)
+        return guard(core.grant_departure, "laptop", src, True)
+
+    @app.post("/api/loading/clear_wrong")
+    def loading_clear_wrong(src: str = Depends(auth)) -> dict:
+        core.clear_wrong_pick("laptop", src)
+        return core.loading.snapshot()
+
+    @app.post("/api/loading/abort")
+    def loading_abort(body: OverrideIn, src: str = Depends(auth)) -> dict:
+        guard(core.abort_loading, body.reason, actor="laptop", source=src)
+        return core.loading.snapshot()
+
+    @app.get("/api/returns")
+    def returns(_src: str = Depends(auth)) -> list[dict]:
+        return core.orders.pending_returns()
+
+    @app.post("/api/returns/{disc_id}/book")
+    def book_return(disc_id: int, src: str = Depends(auth)) -> dict:
+        return guard(core.book_return, disc_id, actor="laptop", source=src)
 
     @app.get("/api/agv")
     def agv(_src: str = Depends(auth)) -> dict:

@@ -17,18 +17,24 @@ from station_gui.core.station import StationCore
 
 
 class FakeAgv:
-    """Stands in for AgvLink: records commands, acks everything, reports IDLE."""
+    """Stands in for AgvLink: records commands, acks everything, starts IDLE + docked."""
 
     def __init__(self):
         self.sent = []
         self.connected = True
         self.online = True
-        self.telemetry = {"state": "IDLE", "faults": [], "pose": {"x": 1.6, "y": 6.0, "theta": 0.0}}
+        self.telemetry = {"state": "IDLE", "faults": [], "pose": {"x": 1.6, "y": 6.0, "theta": 0.0},
+                          "docked": True}
         self.map = None
         self.host, self.port, self.stale_s = "127.0.0.1", 5100, 3.0
 
     def command(self, mtype, data=None, timeout=4.0):
-        self.sent.append((getattr(mtype, "value", mtype), data))
+        name = getattr(mtype, "value", mtype)
+        self.sent.append((name, data))
+        nxt = {"load": "LOADING", "load_abort": "IDLE", "dispatch": "NAVIGATING"}.get(name)
+        if nxt:
+            self.telemetry["state"] = nxt
+            self.telemetry["docked"] = nxt != "NAVIGATING"
         return {"ok": True}
 
     def state(self):
@@ -47,7 +53,14 @@ def core(tmp_path):
     c = StationCore(cfg, Database(tmp_path / "t.db"), start_agv_link=False)
     c.agv = FakeAgv()
     c.auto_dispatch = False
+    c.loading.enabled = False      # plain dispatch; loading has its own tests
     return c
+
+
+@pytest.fixture()
+def lcore(core):
+    core.loading.enabled = True
+    return core
 
 
 def part_id(core, pn):
@@ -180,7 +193,7 @@ def test_modbus_pdu_handling(core):
     rsp = srv.handle_pdu(struct.pack(">BHH", 3, Reg.AGV_STATE, 1), 1)
     assert rsp == bytes([3, 2, 0, 7])
     assert srv.handle_pdu(struct.pack(">BHH", 6, Reg.AGV_STATE, 1), 1) == bytes([0x86, 2])   # read-only
-    assert srv.handle_pdu(struct.pack(">BHH", 3, 49, 5), 1) == bytes([0x83, 2])               # out of range
+    assert srv.handle_pdu(struct.pack(">BHH", 3, 79, 5), 1) == bytes([0x83, 2])               # out of range
     assert srv.handle_pdu(bytes([0x2B, 0x0E, 1, 0]), 1) == bytes([0xAB, 1])                  # unsupported FC
     assert srv.handle_pdu(struct.pack(">BHH", 3, 0, 1), 9) is None                           # other unit id
 
@@ -239,3 +252,127 @@ def test_plc_json_execute(core):
     assert srv.execute("status", {}, "x")["result"]["agv_state"] == "IDLE"
     assert not srv.execute("nope", {}, "x")["ok"]
     assert not srv.execute("create_order", {"quantity": 2}, "x")["ok"]
+
+
+# ------------------------------------------------------------------ home-station loading
+def test_max_lines_per_order(core):
+    pns = [p["part_number"] for p in core.inventory.list_parts() if p["quantity"] > 0][:7]
+    with pytest.raises(ValidationError, match="per order"):
+        core.create_order("a", "WS1", [{"part_number": pn, "quantity": 1} for pn in pns])
+    o = core.create_order("a", "WS1", [{"part_number": pn, "quantity": 1} for pn in pns[:6]])
+    assert sorted(ln["bin"] for ln in o["lines"]) == [1, 2, 3, 4, 5, 6]
+
+
+def test_loading_scan_permit_dispatch(lcore):
+    core = lcore
+    o = core.create_order("a", "WS1", [{"part_number": "NUT-M8", "quantity": 2},
+                                       {"part_number": "BLT-M8x25", "quantity": 1}])
+    core.auto_dispatch = True
+    core._try_auto_dispatch()                                     # AGV docked + idle -> loading starts
+    assert core.agv.sent[-1] == ("load", {"order_id": o["id"]})
+    assert core.orders.get(o["id"])["status"] == OrderStatus.LOADING.value
+    with pytest.raises(ValidationError, match="not fully scanned"):
+        core.grant_departure("plc", "plc:test")
+    assert core.scan_code("APEX:NUT-M8")["result"] == "ok"
+    assert core.scan_code("BRG-6204-2RS")["result"] == "wrong_part"     # not on this order
+    assert core.loading.active.state == "wrong_pick"
+    core._try_auto_dispatch()
+    assert core.agv.sent[-1][0] == "load"                          # no departure with a wrong pick
+    core.clear_wrong_pick()
+    assert core.scan_code("NUT-M8")["result"] == "ok"
+    assert core.scan_code("NUT-M8")["result"] == "over_quantity"
+    core.clear_wrong_pick()
+    assert core.scan_code("XYZ-404")["result"] == "unknown_code"
+    core.clear_wrong_pick()
+    assert core.scan_code("APEX:BLT-M8x25")["result"] == "ok"
+    assert core.loading.active.verified
+    core._try_auto_dispatch()
+    assert core.agv.sent[-1][0] == "load"                          # still waiting for the PLC permit
+    core.grant_departure("plc", "plc:test")                        # KUKA arm clear
+    core._try_auto_dispatch()
+    assert core.agv.sent[-1][0] == "dispatch"
+    assert core.orders.get(o["id"])["status"] == OrderStatus.DISPATCHED.value
+    assert core.loading.active is None
+    log = core.db.query("SELECT result FROM scan_log ORDER BY id")
+    assert [r["result"] for r in log].count("ok") == 3
+    assert core.scan_code("NUT-M8")["result"] == "no_active_load"
+
+
+def test_loading_abort_and_override(lcore):
+    core = lcore
+    o = core.create_order("a", "WS2", [{"part_number": "NUT-M8", "quantity": 1}])
+    core.start_loading(o["id"])
+    core.abort_loading("arm fault")
+    assert core.orders.get(o["id"])["status"] == OrderStatus.APPROVED.value
+    assert core.agv.sent[-1][0] == "load_abort"
+    core.start_loading(o["id"])
+    ack = core.dispatch_order(o["id"])                             # supervisor override: leave now
+    assert ack["ok"] and core.orders.get(o["id"])["status"] == OrderStatus.DISPATCHED.value
+    assert core.db.query("SELECT * FROM audit_log WHERE action='loading.override'")
+
+
+def test_loading_requires_docked(lcore):
+    lcore.agv.telemetry["docked"] = False
+    o = lcore.create_order("a", "WS1", [{"part_number": "NUT-M8", "quantity": 1}])
+    with pytest.raises(ValidationError, match="docked"):
+        lcore.start_loading(o["id"])
+
+
+def test_damaged_return_booking(core):
+    nut = part_id(core, "NUT-M8")
+    q0 = core.inventory.get(nut)["quantity"]
+    o = core.create_order("a", "WS1", [{"part_id": nut, "quantity": 4}])
+    core.dispatch_order(o["id"])
+    core.bus.publish("agv_event", {"kind": "arrived", "order_id": o["id"], "destination": "WS1"})
+    line = core.orders.get(o["id"])["lines"][0]
+    core.receive_order(o["id"], [{"line_id": line["id"], "ok": 3, "damaged": 1}])
+    assert len(core.orders.pending_returns()) == 1
+    core._handle_returns(o["id"], docked=True)                     # AGV docked with the return bin
+    part = core.inventory.get(nut)
+    assert part["damaged_qty"] == 1 and part["quantity"] == q0 - 4  # on-hand reduced once, at submit
+    assert core.orders.pending_returns() == []
+    assert core.agv.sent[-1][0] == "discharge"
+    assert core.kpis()["damaged_units"] >= 1
+
+
+def test_rest_scan_endpoints(lcore):
+    from fastapi.testclient import TestClient
+
+    from station_gui.net.rest_api import create_app
+
+    core = lcore
+    client = TestClient(create_app(core, core.cfg))
+    key = core.cfg.get("security.api_key")
+    o = core.create_order("a", "WS1", [{"part_number": "NUT-M8", "quantity": 1}])
+    h = {"X-API-Key": key}
+    assert client.post("/api/loading/start", headers=h, params={"order_id": o["id"]}).status_code == 200
+    assert client.get("/api/scan", params={"code": "APEX:NUT-M8", "key": "wrong"}).status_code == 401
+    r = client.get("/api/scan", params={"code": "APEX:NUT-M8", "key": key})
+    assert r.status_code == 200 and ">OK<" in r.text
+    assert client.post("/api/scan", headers=h, json={"code": "NUT-M8"}).json()["result"] == "over_quantity"
+    snap = client.get("/api/loading", headers=h).json()
+    assert snap["order_id"] == o["id"] and snap["lines"][0]["scanned"] == 1
+
+
+def test_plc_loading_registers(lcore):
+    from common.protocol.modbus_map import bin_reg
+    from station_gui.net.modbus_server import PlcBridge, RegisterBank
+
+    core = lcore
+    bank = RegisterBank()
+    bridge = PlcBridge(core, bank, core.cfg, lambda: "10.0.0.9")
+    o = core.create_order("a", "WS1", [{"part_number": "NUT-M8", "quantity": 2}])
+    bridge._run(Cmd.START_LOADING, {"ARG_ORDER_ID": o["id"]}, "plc:10.0.0.9")
+    core.scan_code("NUT-M8")
+    bridge.refresh()
+    assert bank.get(Reg.LOAD_ORDER_ID) == o["id"] and bank.get(Reg.LOAD_STATE) == 2
+    assert bank.get(bin_reg(1, 0)) == part_id(core, "NUT-M8") and bank.get(bin_reg(1, 1)) == 2
+    assert bank.get(bin_reg(1, 2)) == 1 and bank.get(Reg.LAST_SCAN_RESULT) == 1
+    assert bank.get(Reg.AGV_DOCKED) == 1
+    with pytest.raises(ValidationError):
+        bridge._run(Cmd.DEPART_PERMIT, {}, "plc:x")                # only 1 of 2 scanned
+    core.scan_code("NUT-M8")
+    assert bridge._run(Cmd.DEPART_PERMIT, {}, "plc:x")[0] == Result.OK
+    core.auto_dispatch = True
+    core._try_auto_dispatch()
+    assert core.orders.get(o["id"])["status"] == OrderStatus.DISPATCHED.value

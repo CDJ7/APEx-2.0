@@ -2,8 +2,14 @@
 
 Status flow (enforced with :data:`common.protocol.states.ORDER_TRANSITIONS`)::
 
-    Pending -> Approved -> Dispatched -> Delivered -> Closed
-       └──────────┴───────────┴──> Cancelled (stock is returned)
+    Pending -> Approved -> Loading -> Dispatched -> Delivered -> Closed
+       └──────────┴──────────┴───────────┴──> Cancelled (stock is returned)
+
+* Each order line is assigned one of the AGV's six tray bins (max six lines).
+* Loading (home station): the KUKA arm loads the bins, the phone in the
+  flexbase scans each part's QR code (``qty_scanned``), the PLC grants departure.
+* Damaged items reported at receiving ride back in the return bin; when the AGV
+  docks at home they are *booked*: the part's ``damaged_qty`` counter rises.
 
 * Submitting an order validates stock and **decrements inventory** immediately
   (the parts are pulled for loading onto the AGV).
@@ -29,6 +35,7 @@ MAX_LINES = 50
 MAX_QTY = 10_000
 
 _STATUS_TIME_COLUMN = {
+    OrderStatus.LOADING: "loading_started_at",
     OrderStatus.APPROVED: "approved_at",
     OrderStatus.DISPATCHED: "dispatched_at",
     OrderStatus.DELIVERED: "delivered_at",
@@ -115,7 +122,7 @@ class OrderService:
     # ------------------------------------------------------------------ create
     def create(self, requester: str, destination: str, lines: list[dict[str, Any]], notes: str = "",
                priority: int = 0, actor: str = "operator", source: str = "gui",
-               auto_approve: bool = False) -> dict:
+               auto_approve: bool = False, max_lines: int = MAX_LINES) -> dict:
         """Create a multi-line order and reserve (decrement) the stock.
 
         ``lines``: ``[{"part_id": 3, "quantity": 5}, {"part_number": "BRG-6204-2RS", "quantity": 2}]``
@@ -151,6 +158,8 @@ class OrderService:
                 raise ValidationError(f"{part['part_number']} is {part['status']} and cannot be ordered")
             merged[part["id"]] = merged.get(part["id"], 0) + qty
             parts[part["id"]] = part
+        if len(merged) > max_lines:
+            raise ValidationError(f"At most {max_lines} different parts per order (one per AGV bin)")
 
         with self.db.transaction() as c:
             # re-check stock inside the transaction (another client may have ordered meanwhile)
@@ -166,9 +175,9 @@ class OrderService:
                 "VALUES (?,?,?,?,?,?,?)",
                 (now_iso(), requester, destination, OrderStatus.PENDING.value, int(priority), notes[:500], source))
             oid = int(cur.lastrowid)
-            for pid, qty in merged.items():
-                c.execute("INSERT INTO order_lines(order_id, part_id, part_number, part_name, qty_ordered) "
-                          "VALUES (?,?,?,?,?)", (oid, pid, parts[pid]["part_number"], parts[pid]["name"], qty))
+            for bin_no, (pid, qty) in enumerate(merged.items(), start=1):
+                c.execute("INSERT INTO order_lines(order_id, part_id, part_number, part_name, qty_ordered, bin) "
+                          "VALUES (?,?,?,?,?,?)", (oid, pid, parts[pid]["part_number"], parts[pid]["name"], qty, bin_no))
                 c.execute("UPDATE parts SET quantity = quantity - ?, updated_at=? WHERE id=?", (qty, now_iso(), pid))
             self.db.audit(actor, source, "order.create", "order", oid,
                           {"destination": destination, "lines": {parts[p]["part_number"]: q for p, q in merged.items()}},
@@ -187,6 +196,37 @@ class OrderService:
             self.db.audit(actor, source, "order.approve", "order", order_id, conn=c)
         self._changed()
         return self.get(order_id)  # type: ignore[return-value]
+
+    def start_loading(self, order_id: int, source: str = "system") -> dict:
+        """Approved -> Loading: the KUKA arm starts filling the bins; scan counters reset."""
+        with self.db.transaction() as c:
+            self._set_status(c, self._load(c, order_id), OrderStatus.LOADING, {"last_error": ""})
+            c.execute("UPDATE order_lines SET qty_scanned=0 WHERE order_id=?", (order_id,))
+            self.db.audit("system", source, "order.loading", "order", order_id, conn=c)
+        self._changed()
+        return self.get(order_id)  # type: ignore[return-value]
+
+    def add_scan(self, line_id: int) -> None:
+        self.db.execute("UPDATE order_lines SET qty_scanned = qty_scanned + 1 WHERE id=?", (line_id,))
+        self._changed()
+
+    def revert_loading(self, order_id: int, reason: str) -> None:
+        """Loading -> Approved (aborted / AGV unavailable); scans are discarded."""
+        with self.db.transaction() as c:
+            order = self._load(c, order_id)
+            if order["status"] == OrderStatus.LOADING.value:
+                self._set_status(c, order, OrderStatus.APPROVED, {"last_error": reason[:300]})
+                c.execute("UPDATE order_lines SET qty_scanned=0 WHERE order_id=?", (order_id,))
+                self.db.audit("system", "station", "order.loading_aborted", "order", order_id, reason, conn=c)
+        self._changed()
+
+    def set_departure_permit(self, order_id: int) -> None:
+        self.db.execute("UPDATE orders SET departure_permit_at=? WHERE id=?", (now_iso(), order_id))
+
+    def set_result(self, order_id: int, result: str) -> None:
+        """Task completion result reported for the order (report: id, ack, timeout, result)."""
+        self.db.execute("UPDATE orders SET result=? WHERE id=?", (result[:120], order_id))
+        self._changed()
 
     def mark_dispatched(self, order_id: int, source: str = "system") -> None:
         with self.db.transaction() as c:
@@ -208,7 +248,7 @@ class OrderService:
         """A dispatch failed/was rejected by the AGV: make the order dispatchable again."""
         with self.db.transaction() as c:
             order = self._load(c, order_id)
-            if order["status"] == OrderStatus.DISPATCHED.value:
+            if order["status"] in (OrderStatus.DISPATCHED.value, OrderStatus.LOADING.value):
                 self._set_status(c, order, OrderStatus.APPROVED, {"last_error": error[:300]})
             else:
                 c.execute("UPDATE orders SET last_error=? WHERE id=?", (error[:300], order_id))
@@ -270,9 +310,11 @@ class OrderService:
                           (ok, dmg, mis, lnotes, lid))
                 for kind, qty in (("Damaged", dmg), ("Missing", mis)):
                     if qty:
+                        # damaged parts ride back to the home station in the return bin
                         c.execute("INSERT INTO discrepancies(created_at, order_id, line_id, part_number, part_name, "
-                                  "kind, quantity, notes, reported_by) VALUES (?,?,?,?,?,?,?,?,?)",
-                                  (ts, order_id, lid, ln["part_number"], ln["part_name"], kind, qty, lnotes, actor))
+                                  "kind, quantity, notes, reported_by, return_status) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                                  (ts, order_id, lid, ln["part_number"], ln["part_name"], kind, qty, lnotes, actor,
+                                   "pending" if kind == "Damaged" else ""))
                 summary[ln["part_number"]] = {"ok": ok, "damaged": dmg, "missing": mis}
             self._set_status(c, order, OrderStatus.CLOSED, {"receive_notes": notes[:500]})
             self.db.audit(actor, source, "order.receive", "order", order_id, {"lines": summary, "notes": notes}, conn=c)
@@ -296,11 +338,42 @@ class OrderService:
             self.db.audit(actor, source, "discrepancy.resolve", "discrepancy", disc_id, resolution, conn=c)
         self._changed()
 
+    # ------------------------------------------------------------------ returns
+    def pending_returns(self, order_id: int | None = None) -> list[dict]:
+        sql = "SELECT * FROM discrepancies WHERE kind='Damaged' AND return_status='pending'"
+        params: tuple = ()
+        if order_id is not None:
+            sql += " AND order_id=?"
+            params = (order_id,)
+        return self.db.query(sql + " ORDER BY id", params)
+
+    def book_return(self, disc_id: int, actor: str = "system", source: str = "agv") -> dict:
+        """A damaged part arrived back at the home station: +qty on the part's damaged counter.
+
+        On-hand stock is not touched here - it was already reduced when the order was
+        submitted, so the unit simply moves to the damaged count.
+        """
+        with self.db.transaction() as c:
+            d = c.execute("SELECT * FROM discrepancies WHERE id=?", (disc_id,)).fetchone()
+            if d is None or d["kind"] != "Damaged" or d["return_status"] != "pending":
+                raise ValidationError("No pending damaged return with that id")
+            c.execute("UPDATE discrepancies SET return_status='returned', returned_at=? WHERE id=?", (now_iso(), disc_id))
+            c.execute("UPDATE parts SET damaged_qty = damaged_qty + ?, updated_at=? WHERE part_number=?",
+                      (d["quantity"], now_iso(), d["part_number"]))
+            self.db.audit(actor, source, "return.booked", "discrepancy", disc_id,
+                          {"part_number": d["part_number"], "quantity": d["quantity"], "order_id": d["order_id"]}, conn=c)
+        self._changed(inventory_too=True)
+        return dict(d)
+
+    def book_returns_for_order(self, order_id: int, actor: str = "system", source: str = "agv") -> list[dict]:
+        return [self.book_return(d["id"], actor, source) for d in self.pending_returns(order_id)]
+
     def discrepancies_csv(self) -> str:
         rows = self.discrepancies()
         buf = io.StringIO()
         fields = ["id", "created_at", "order_id", "part_number", "part_name", "kind", "quantity", "notes",
-                  "reported_by", "requester", "destination", "resolved", "resolved_at", "resolution"]
+                  "reported_by", "requester", "destination", "return_status", "returned_at", "resolved",
+                  "resolved_at", "resolution"]
         w = csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore")
         w.writeheader()
         w.writerows(rows)
