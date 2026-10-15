@@ -82,6 +82,9 @@ def main() -> int:
         if name == "Orders":
             win.pages[i].tabs.setCurrentIndex(1)
             win.pages[i].history.table.selectRow(0)
+        if name == "Receiving":
+            win.pages[i].receive.refresh()
+            win.pages[i].receive.table.selectRow(0)
         pump(app, 1.2)
         path = out / f"station_{i + 1}_{name.lower().replace(' ', '_')}.png"
         win.grab().save(str(path))

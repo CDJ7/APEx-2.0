@@ -138,12 +138,14 @@ class ModbusTcpServer:
                 if addr + count > n:
                     return exc(EX_ILLEGAL_ADDRESS)
                 vals = self.bank.read(addr, count)
+                log.debug("FC%02d read  ip=%s addr=%d count=%d", fc, ip, addr, count)
                 return bytes([fc, count * 2]) + struct.pack(f">{count}H", *vals)
             if fc == 6:
                 addr, value = struct.unpack(">HH", pdu[1:5])
                 if addr not in PLC_WRITABLE:
                     log.warning("PLC write to read-only register %d from %s", addr, ip)
                     return exc(EX_ILLEGAL_ADDRESS)
+                log.debug("FC06 write ip=%s addr=%d value=%d", ip, addr, value)
                 self.bank.plc_write(addr, [value])
                 return pdu[:5]
             if fc == 16:
@@ -154,6 +156,7 @@ class ModbusTcpServer:
                     log.warning("PLC write to read-only registers %d..%d from %s", addr, addr + count - 1, ip)
                     return exc(EX_ILLEGAL_ADDRESS)
                 values = list(struct.unpack(f">{count}H", pdu[6:6 + nbytes]))
+                log.debug("FC16 write ip=%s addr=%d values=%s", ip, addr, values)
                 self.bank.plc_write(addr, values)
                 return pdu[:5]
         except struct.error:

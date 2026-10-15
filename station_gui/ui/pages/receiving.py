@@ -33,8 +33,10 @@ class ReceiveTab(QWidget):
         self.table = make_table(self.model, status_columns=["status"], stretch="requester")
         self.table.selectionModel().selectionChanged.connect(lambda *_: self.load_selected())
         left.body.addWidget(self.table, 1)
-        left.body.addWidget(muted("Delivered = AGV reported arrival. Dispatched orders can also be received\n"
-                                  "(e.g. if the arrival event was missed)."))
+        hint = muted("Delivered = AGV reported arrival. Dispatched orders can also be received "
+                     "(e.g. if the arrival event was missed).")
+        hint.setWordWrap(True)
+        left.body.addWidget(hint)
         split.addWidget(left)
 
         right = Card("Condition report")
@@ -53,8 +55,9 @@ class ReceiveTab(QWidget):
         hh = self.grid.horizontalHeader()
         hh.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         hh.setSectionResizeMode(COL_NAME, QHeaderView.Stretch)
-        hh.setSectionResizeMode(COL_NOTES, QHeaderView.Stretch)
-        for col, w in ((COL_PART, 130), (COL_ORD, 70), (COL_OK, 100), (COL_DMG, 90), (COL_MIS, 90), (COL_CHECK, 34)):
+        self.grid.setWordWrap(False)
+        for col, w in ((COL_PART, 125), (COL_ORD, 66), (COL_OK, 92), (COL_DMG, 84), (COL_MIS, 84),
+                       (COL_NOTES, 170), (COL_CHECK, 30)):
             self.grid.setColumnWidth(col, w)
         right.body.addWidget(self.grid, 1)
         self.receiver = QLineEdit(str(ctx.cfg.get("station.default_requester", "operator")))
@@ -68,7 +71,7 @@ class ReceiveTab(QWidget):
         right.body.addLayout(hbox(button("All received OK", slot=self.all_ok), self.status_lbl, None,
                                   self.submit_btn))
         split.addWidget(right)
-        split.setSizes([380, 760])
+        split.setSizes([300, 900])
         self.setLayout(vbox(split, margins=(0, 12, 0, 0)))
         ctx.bridge.orders_changed.connect(self.refresh)
         self._clear()
