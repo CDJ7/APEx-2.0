@@ -20,7 +20,8 @@ over SSH unless noted otherwise.
 2. *Device*: Raspberry Pi 5 · *OS*: Raspberry Pi OS (64-bit) · *Storage*: your card (≥ 32 GB, A2 class).
 3. Click **Next → Edit settings** (OS customisation):
    * **General**: hostname `apex-agv`; username `apex` + a strong password;
-     Wi-Fi SSID/password of the AGV router; **Wireless LAN country** (e.g. US); locale/timezone.
+     Wi-Fi SSID/password of the team router (NETGEAR N600 DGND3700v2; use its
+     5 GHz network if coverage allows); **Wireless LAN country** (e.g. US); locale/timezone.
    * **Services**: ✅ Enable SSH (password, or better: paste your public key).
 4. Write, insert the card, power the Pi with a **5 V / 5 A USB-C supply**.
 
@@ -47,12 +48,14 @@ ip -4 addr show wlan0                      # verify 192.168.1.40
 ping -c3 192.168.1.10                      # main station
 ```
 
-Use your router's gateway address if it is not `192.168.1.1`. Reserve
-192.168.1.10/.20/.30/.40 in the router's DHCP settings so nothing else takes them.
+Use the router's gateway address if it is not `192.168.1.1` **[TBD: confirm in
+the DGND3700v2 admin page]**. Reserve 192.168.1.10/.20/.30/.40 (and .50 for the
+flexbase phone) in the router's DHCP settings so nothing else takes them.
 
 ## 3. Camera Module 3
 
-Connect with the Pi 5 **22-pin "mini" CSI cable** to `CAM/DISP 0`, contacts
+Connect with the **15-to-22-pin Standard-Mini camera cable** (Pi 5 CSI is the
+22-pin "mini" connector) to `CAM/DISP 0`, contacts
 facing the right way, with the Pi powered off. Bookworm auto-detects the
 camera (`camera_auto_detect=1` in `/boot/firmware/config.txt`).
 

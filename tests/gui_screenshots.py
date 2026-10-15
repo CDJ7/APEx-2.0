@@ -5,7 +5,8 @@ Start the AGV simulator first, then::
     python -m agv_pi.main --sim &
     QT_QPA_PLATFORM=offscreen python -m tests.gui_screenshots --sim --out docs/img
 
-It creates a demo order, lets the AGV drive for a few seconds and then grabs
+It creates demo orders, runs one through home-station loading (QR scans incl.
+a wrong pick, PLC permit), lets the AGV drive for a few seconds and then grabs
 each page of the real main window.
 """
 
@@ -61,26 +62,50 @@ def main() -> int:
     servers.start()
     pump(app, 3.0)
 
-    # demo data: one order closed with a discrepancy, one being delivered, one queued
+    # demo data: one order closed with a damaged item (returned to the home station),
+    # one being loaded at the home station (KUKA + phone QR scans), one queued
     core.auto_dispatch = False
     o2 = core.create_order("bob", "WS2", [{"part_number": "SNS-PROX-M12", "quantity": 3}], priority=1)
     core.orders.mark_dispatched(o2["id"])
     core.orders.mark_delivered(o2["id"])
     core.receive_order(o2["id"], [{"line_id": o2["lines"][0]["id"], "ok": 2, "damaged": 1, "missing": 0,
                                    "notes": "cracked housing"}], "box was dented")
-    core.create_order("alice", "WS1", [{"part_number": "BRG-6204-2RS", "quantity": 4},
-                                       {"part_number": "BLT-M8x25", "quantity": 20}], "line 3 rebuild")
+    core.orders.book_returns_for_order(o2["id"])
+    o1 = core.create_order("alice", "WS1", [{"part_number": "BRG-6204-2RS", "quantity": 4},
+                                            {"part_number": "BLT-M8x25", "quantity": 6}], "line 3 rebuild")
     core.create_order("carol", "WS3", [{"part_number": "RLY-24VDC", "quantity": 2}])
-    core.auto_dispatch = True
-    pump(app, args.drive)
+    pump(app, 1.0)
+    core.start_loading(o1["id"], "gui", "gui")
+    for code in ["APEX:BRG-6204-2RS"] * 4 + ["APEX:NUT-M8"]:       # last one is a wrong pick
+        core.scan_code(code, "flexbase-phone", "rest:192.168.1.50")
+    core.clear_wrong_pick()
+    for code in ["APEX:BLT-M8x25"] * 3:
+        core.scan_code(code, "flexbase-phone", "rest:192.168.1.50")
+    pump(app, 1.0)
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
+    orders_i = [n for n, _ in NAV].index("Orders")
+    win.group.button(orders_i).setChecked(True)
+    win.show_page(orders_i)
+    win.pages[orders_i].tabs.setCurrentIndex(1)
+    pump(app, 9.0)                                  # let the notification toasts expire
+    win.grab().save(str(out / "station_3c_loading.png"))
+    print("saved", out / "station_3c_loading.png")
+
+    # finish the load, PLC grants departure, the AGV drives
+    for code in ["APEX:BLT-M8x25"] * 3:
+        core.scan_code(code, "flexbase-phone", "rest:192.168.1.50")
+    core.grant_departure("plc", "plc:192.168.1.30")
+    core.auto_dispatch = True
+    core._kick_dispatcher()  # noqa: SLF001
+    pump(app, args.drive)
+
     for i, (name, _cls) in enumerate(NAV):
         win.group.button(i).setChecked(True)
         win.show_page(i)
         if name == "Orders":
-            win.pages[i].tabs.setCurrentIndex(1)
+            win.pages[i].tabs.setCurrentIndex(2)
             win.pages[i].history.table.selectRow(0)
         if name == "Receiving":
             win.pages[i].receive.refresh()

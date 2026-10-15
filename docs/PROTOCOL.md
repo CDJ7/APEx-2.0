@@ -10,6 +10,12 @@ protocol is the single source of truth and is shared by all components:
 | PLC → Station | Modbus TCP (station = server, PLC = client) | [3](#3-plc--station-modbus-tcp) | `common/protocol/modbus_map.py`, `station_gui/net/modbus_server.py` |
 | PLC → Station (fallback) | TCP NDJSON, port 5200 | [4](#4-plc--station-tcpjson-fallback) | `station_gui/net/plc_tcp_server.py` |
 | Laptop → Station | HTTP REST (FastAPI), port 8000 | [5](#5-laptop--station-rest-api) | `station_gui/net/rest_api.py` |
+| Flexbase phone → Station | HTTP `/api/scan` (QR scanner app), port 8000 | [5.1](#51-phone-qr-scanner-home-station-loading) | `station_gui/net/rest_api.py`, `station_gui/core/loading.py` |
+| Flysky FS-iA6B → Arduino | i-BUS serial, 115200, on D0 | [1.5](#15-manual-rc-flysky-i-bus) | `agv_arduino/agv_arduino.ino` |
+
+Control hierarchy: **PLC** (system master: orders, departure permission) →
+**station PC** (database, GUI, dispatcher) → **Pi 5** (AGV master: navigation,
+safety supervision) → **Arduino** (slave: motors, encoders, sensors, watchdog).
 
 All IPs and ports come from `config.yaml`.
 
@@ -19,7 +25,8 @@ All IPs and ports come from `config.yaml`.
 
 **Roles.** The Raspberry Pi is the master; the Arduino executes commands and
 reports. The Arduino's only autonomous actions are safety reflexes (E-stop,
-bumpers, watchdog).
+watchdog, optional bumpers) and driving from the Flysky sticks while the RC
+override switch is on.
 
 ### 1.1 Framing
 
@@ -29,7 +36,7 @@ bumpers, watchdog).
 
 * `BODY` — comma-separated ASCII fields, first field = frame name. No `*`.
 * `CS` — XOR of every byte of `BODY`, two **upper-case** hex digits (NMEA style).
-* `\r` is ignored, `\n` ends the frame, max line length **96** bytes
+* `\r` is ignored, `\n` ends the frame, max line length **128** bytes
   (longer lines are dropped and answered with `ERR,4`).
 * A bare `STOP` line without checksum is always accepted (stopping is always safe).
 
@@ -53,7 +60,10 @@ Checksum examples (verified in `tests/test_protocol.py`):
 | `CLR` | Clear latched faults (only those whose cause is gone). | `ACK,CLR` |
 | `RST` | Zero both encoder counters. | `ACK,RST` |
 | `CFG,<ramp>,<stat_ms>` | Ramp rate in PWM units/s (1–5000), STAT period 20–1000 ms. | `ACK,CFG` |
+| `ACT,<dir>,<ms>` | Return-bin linear actuator: dir 1 extend / −1 retract / 0 stop, run time 0–15000 ms. Rejected (`ERR,5`) during E-stop, fault or RC manual. | `ACK,ACT` |
 | `PING` | Liveness / firmware version. | `PONG,<fw>` |
+
+Actuator examples: `ACT,1,6000*61` · `ACT,-1,6500*49` · `ACT,0,0*56`.
 
 ### 1.3 Arduino → Pi
 
@@ -61,8 +71,8 @@ Checksum examples (verified in `tests/test_protocol.py`):
 |---|---|
 | `BOOT,<fw>` | Sent once after reset. The Pi re-sends `CFG` and resets its odometry baseline. |
 | `STAT,...` | Periodic status (default every 50 ms = 20 Hz), fields below. |
-| `ACK,<name>` | Reply to `CLR`, `RST`, `CFG`. |
-| `ERR,<code>,<detail>` | 1 = bad/missing checksum, 2 = unknown command, 3 = bad arguments, 4 = line too long. |
+| `ACK,<name>` | Reply to `CLR`, `RST`, `CFG`, `ACT`. |
+| `ERR,<code>,<detail>` | 1 = bad/missing checksum, 2 = unknown command, 3 = bad arguments, 4 = line too long, 5 = rejected in the current state. |
 | `PONG,<fw>` | Reply to `PING`. |
 
 `STAT` fields, in order:
@@ -76,15 +86,18 @@ Checksum examples (verified in `tests/test_protocol.py`):
 | 5 | `speed_right` | int32 | Ticks/s |
 | 6 | `ir1` | int | Front-left IR: raw ADC 0–1023 (analog) or 1 = obstacle (digital) |
 | 7 | `ir2` | int | Front-right IR |
-| 8 | `bumper` | bitmask | bit0 left, bit1 right (1 = pressed) |
+| 8 | `bumper` | bitmask | bit0 left, bit1 right (1 = pressed); always 0 when `BUMPERS_FITTED 0` |
 | 9 | `estop` | 0/1 | Hardware E-stop input active (live, debounced on release) |
 | 10 | `fault` | bitmask | Latched faults: 1 WATCHDOG, 2 ESTOP, 4 BUMPER |
 | 11 | `pwm_left` | int | PWM actually applied after ramping |
 | 12 | `pwm_right` | int | |
-| 13 | `vbat_mv` | uint | Battery voltage (mV), 0 if not wired |
+| 13 | `vbat_mv` | uint | Battery voltage (mV, 24 V SLA ≈ 25400 full), 0 if not wired |
 | 14 | `hb_seq` | uint16 | Last heartbeat sequence received |
+| 15 | `dock` | 0/1 | Hall-effect dock sensor: 1 = magnet detected (charge / wait position) |
+| 16 | `rc` | 0/1/2 | Flysky: 0 no signal · 1 signal, override off · 2 **manual override active** |
+| 17 | `act` | −1/0/1 | Return-bin actuator: 1 extending · −1 retracting · 0 idle |
 
-Example: `STAT,123456,1520,1498,640,655,410,95,0,0,0,152,150,12380,812*1B`
+Example: `STAT,123456,1520,1498,640,655,410,95,0,0,0,152,150,25120,812,1,0,0*0A`
 
 ### 1.4 Safety behaviour (Arduino)
 
@@ -92,10 +105,25 @@ Example: `STAT,123456,1520,1498,640,655,410,95,0,0,0,152,150,12380,812*1B`
 |---|---|---|---|
 | No valid `HB`/`CMD` for 500 ms (after the first one) | hard stop | WATCHDOG | `CLR` |
 | E-stop input open (button pressed or wire broken) | hard stop instantly | ESTOP | release **and** `CLR` |
-| Bumper pressed | hard stop | BUMPER | release **and** `CLR` |
+| Bumper pressed (only if fitted) | hard stop | BUMPER | release **and** `CLR` |
+| Any of the above | actuator relays off | — | — |
+
+The firmware E-stop input senses a second NC contact (or K1's auxiliary
+contact) of the **hardwired** E-stop circuit, which removes motion power by
+dropping contactor K1 (see `docs/WIRING.md`).
 
 The Pi sends `CFG` + `CLR` at the start of every serial session; after an
 E-stop the operator must press **Reset** (station/PLC), which sends `CLR`.
+
+### 1.5 Manual RC (Flysky i-BUS)
+
+The FS-iA6B receiver's i-BUS output (32-byte frames, 14 channels, 115200 8N1)
+goes to the Arduino's `Serial1` RX (D0). CH5 (SwA) above 1700 µs = **manual
+override**: the Arduino ignores `CMD` and mixes CH2 (throttle) and CH1
+(steering) into the wheel PWMs, limited to `RC_MAX_PWM`; the watchdog and
+E-stop still apply. No valid frame for 100 ms = signal lost = stop. The Pi
+sees `rc=2` in `STAT`, enters **MANUAL**, aborts any task (`task_failed`)
+and refuses dispatches until the switch is off.
 
 ---
 
@@ -127,7 +155,10 @@ reference it as `ack.ref`) · `ts` UNIX time · `src` sender name · `data` payl
 
 | type | data | Accepted in | Effect |
 |---|---|---|---|
-| `dispatch` | `order_id` (int), `destination` (station name), `items` (opt.) | IDLE, no blocking fault, localised | plan route, start delivery leg; ack carries `route`, `length_m` |
+| `load` | `order_id` | IDLE and **docked** | enter LOADING: the KUKA arm loads the bins, motion inhibited |
+| `load_abort` | — | LOADING | back to IDLE |
+| `dispatch` | `order_id` (int), `destination` (station name), `items` (opt.: `part_number`, `qty`, `bin`) | IDLE or LOADING (same order), **docked**, no blocking fault, localised | plan route, start delivery leg; ack carries `route`, `length_m` |
+| `discharge` | — | IDLE/LOADING, docked, stationary | tip the return bin: `ACT` extend, hold, retract (`agv.actuator`) → `discharge_done` |
 | `cancel` | `order_id` (opt.) | task active | abort delivery, return home |
 | `release` | — | ARRIVED | leave the workstation, return home |
 | `return_home` | — | not FAULT/E_STOP | abort any task, go home |
@@ -137,10 +168,18 @@ reference it as `ack.ref`) · `ts` UNIX time · `src` sender name · `data` payl
 | `clear_blocked` | `edge` `[a,b]` (opt.; all if absent) | any | unblock route segments |
 | `set_pose` | `station` or `x`,`y`,`theta` | not moving | re-initialise localisation |
 | `get_map` | — | any | AGV answers with a `map` message |
-| `sim` | `action`: `spawn`(kind,x,y,x2,y2,speed,ttl_s) · `remove`(id) · `estop`(pressed) · `list` | **simulation only** | scenario control |
+| `sim` | `action`: `spawn`(kind,x,y,x2,y2,speed,ttl_s) · `remove`(id) · `estop`(pressed) · `rc_manual`(on) · `list` | **simulation only** | scenario control |
 | `ping` | — | any | `pong` |
 
 `ack`: `{"ref": "<id>", "ok": true|false, "error": "...", "cmd": "dispatch", ...}`
+
+**Link supervision.** Clients send a `ping` every second when idle
+(`common/netlink.py`). If no client message arrives for
+`safety.station_link_timeout_s` (3 s) while the AGV is moving, it stops and
+holds (`link_lost`, fault `LINK_LOST`, telemetry `link_hold: true`); with
+`station_link_auto_resume` it continues once the link is back
+(`link_restored`). Wi-Fi is not a safety function: emergency stopping is the
+hardwired E-stop.
 
 ### 2.4 Telemetry (AGV → clients, 5 Hz)
 
@@ -154,6 +193,7 @@ reference it as `ack.ref`) · `ts` UNIX time · `src` sender name · `data` payl
  "sensors": {"arduino": true, "lidar": true, "lidar_hz": 7.0, "camera": true, "camera_fps": 20.0,
              "vision": {"obstacle": false, "zone": "none", "moving": false, "person": false, "fps": 20.0, "ok": true},
              "ir_cm": [null, 63.2], "warnings": [], "leg": "delivery"},
+ "docked": false, "manual": false, "actuator": 0, "link_hold": false, "loading_order_id": null,
  "simulation": false, "uptime_s": 812.4}
 ```
 
@@ -166,7 +206,12 @@ reference it as `ack.ref`) · `ts` UNIX time · `src` sender name · `data` payl
 | `state_change` | every state transition | `frm`, `to`, `reason` |
 | `task_accepted` / `task_rejected` / `task_cancelled` | dispatch outcome | `destination`, `route`, `length_m` |
 | `arrived` | reached the destination station | `destination` |
-| `returned_home` | back at the home station | |
+| `returned_home` | back at the home station, after docking | `docked` |
+| `docked` / `dock_failed` | Hall sensor found / not found within `agv.dock.max_approach_s` | |
+| `discharge_done` | return bin tipped and retracted (or interrupted) | `ok` |
+| `manual_mode` | Flysky override switched on / off | `on` |
+| `link_lost` / `link_restored` | station link stale while moving / back | |
+| `task_failed` | task aborted (manual override, task timeout) | `result` |
 | `obstacle_detected` / `obstacle_cleared` | stop for / resume after an obstacle | `source`, `distance`, `edge` |
 | `segment_blocked` | permanent obstacle → edge marked blocked | `edge`, `x`, `y` |
 | `rerouting` / `reroute_failed` | alternate route found / none exists | `route`, `length_m` / `goal` |
@@ -183,11 +228,16 @@ reference it as `ack.ref`) · `ts` UNIX time · `src` sender name · `data` payl
 
 States (`common/protocol/states.py`, code = Modbus value):
 IDLE 0 · RECEIVING_TASK 1 · NAVIGATING 2 · OBSTACLE_WAIT 3 · REROUTING 4 ·
-ARRIVED 5 · RETURNING 6 · FAULT 7 · E_STOP 8 · MANUAL 9 · OFFLINE 15.
+ARRIVED 5 · RETURNING 6 · FAULT 7 · E_STOP 8 · MANUAL 9 · LOADING 10 ·
+DOCKING 11 · OFFLINE 15.
+
+Normal cycle: IDLE (docked) → LOADING → RECEIVING_TASK → NAVIGATING (↔
+OBSTACLE_WAIT / REROUTING) → ARRIVED → RETURNING → DOCKING → IDLE.
 
 Faults (bit = code − 1 in the Modbus fault word): ARDUINO_LINK 1 ·
 ARDUINO_WATCHDOG 2 · LIDAR 3 · CAMERA 4 · LOCALIZATION 5 · NO_ROUTE 6 ·
-BUMPER 7 · LOW_BATTERY 8 · HW_ESTOP 9 · INTERNAL 10.
+BUMPER 7 · LOW_BATTERY 8 · HW_ESTOP 9 · INTERNAL 10 · TASK_TIMEOUT 11 ·
+DOCK 12 · LINK_LOST 13.
 
 ---
 
@@ -196,8 +246,9 @@ BUMPER 7 · LOW_BATTERY 8 · HW_ESTOP 9 · INTERNAL 10.
 The station is the Modbus **server**; the PLC is the **client** (it polls and
 writes — consistent with the PLC being the system master). Holding registers
 only (FC 03 read, FC 06/16 write; FC 04 reads the same table). Unit id
-`plc.modbus_unit_id` (1). Port `network.station.plc_modbus_port` (5020 by
-default; use **502** in production — see `docs/PLC_INTEGRATION.md`).
+`plc.modbus_unit_id` (1). Port `network.station.plc_modbus_port` (**502**;
+`plc_modbus_port_sim` 5020 in simulation — see `docs/PLC_INTEGRATION.md`).
+80 registers (0–79).
 
 Addresses are 0-based protocol addresses; in Allen-Bradley/Modicon notation
 they are **400001 + address**.
@@ -238,10 +289,26 @@ Writes outside 0–7 are refused with Modbus exception 02.
 | 34 | 400035 | `OPEN_ORDERS` | orders not Closed/Cancelled |
 | 35 | 400036 | `PENDING_DISPATCH` | approved orders waiting for the AGV |
 | 36 | 400037 | `LOW_STOCK_COUNT` | active parts at/below reorder threshold |
-| 37 | 400038 | `LAST_EVENT_CODE` | 1 ORDER_CREATED · 2 ORDER_DISPATCHED · 3 AGV_ARRIVED · 4 AGV_RETURNED_HOME · 5 OBSTACLE · 6 SEGMENT_BLOCKED · 7 REROUTING · 8 FAULT · 9 ESTOP · 10 ORDER_CLOSED · 11 ORDER_CANCELLED · 12 LOW_STOCK |
+| 37 | 400038 | `LAST_EVENT_CODE` | 1 ORDER_CREATED · 2 ORDER_DISPATCHED · 3 AGV_ARRIVED · 4 AGV_RETURNED_HOME · 5 OBSTACLE · 6 SEGMENT_BLOCKED · 7 REROUTING · 8 FAULT · 9 ESTOP · 10 ORDER_CLOSED · 11 ORDER_CANCELLED · 12 LOW_STOCK · 13 LOADING_STARTED · 14 LOAD_VERIFIED · 15 WRONG_PICK · 16 MANUAL_MODE · 17 DOCKED · 18 TASK_FAILED · 19 RETURNS_DISCHARGED |
 | 38 | 400039 | `LAST_EVENT_COUNTER` | increments with every new event |
 | 39 | 400040 | `PLC_LINK_OK` | 1 = station sees the PLC heartbeat changing |
 | 40 | 400041 | `AGV_DEST_STATION_ID` | `plc_id` of the current destination |
+
+### 3.2a Home-station loading block (read by the PLC)
+
+| Addr | 4xxxxx | Name | Description |
+|---|---|---|---|
+| 41 | 400042 | `LOAD_STATE` | 0 none · 1 waiting for arm · 2 scanning · 3 verified · 4 wrong pick · 5 departing |
+| 42 | 400043 | `LOAD_ORDER_ID` | order being loaded (0 = none) |
+| 43 | 400044 | `LOAD_SEQ` | increments for every new load request (start the arm program on change) |
+| 44 | 400045 | `LOAD_LINE_COUNT` | bins used, 1–6 |
+| 45 | 400046 | `LAST_SCAN_RESULT` | 0 none · 1 ok · 2 wrong part · 3 over quantity · 4 unknown code · 5 no active load |
+| 46 | 400047 | `SCAN_COUNTER` | increments on every phone scan |
+| 47 | 400048 | `AGV_DOCKED` | 1 = Hall sensor: AGV in the charge / wait position |
+| 48 | 400049 | `AGV_MANUAL` | 1 = Flysky override active |
+| 49 | 400050 | `PENDING_RETURNS` | damaged items on their way back to the home station |
+| 50 | 400051 | `DAMAGED_UNITS` | units in the damaged inventory |
+| 51–68 | 400052–400069 | bin table | bin *b* (1–6): `51+3(b−1)` part id · `+1` quantity · `+2` quantity scanned |
 
 ### 3.3 Command codes
 
@@ -260,6 +327,13 @@ Writes outside 0–7 are refused with Modbus exception 02.
 | 10 | RELEASE | | |
 | 11 | CLEAR_BLOCKED | | |
 | 12 | APPROVE_ORDER | ARG_ORDER_ID | |
+| 13 | DEPART_PERMIT | | order id — KUKA arm clear; the AGV leaves once the QR check passed (`REJECTED` otherwise) |
+| 14 | LOAD_ABORT | | |
+| 15 | START_LOADING | ARG_ORDER_ID (0 = next) | order id; AGV must be docked + idle |
+| 16 | DISCHARGE | | tip the return bin (docked only) |
+
+With loading enabled, `DISPATCH_NEXT`/`DISPATCH_ORDER` on an Approved order
+start loading; on the order being loaded they are a supervisor override.
 
 ### 3.4 Handshake
 
@@ -288,7 +362,9 @@ object per line.
 Commands: `status`, `create_order` (`part_number` or `part_id`, `quantity`,
 `destination` or `station_id`), `approve_order`, `cancel_order`,
 `dispatch_next`, `dispatch_order`, `get_order`, `list_orders`, `estop`,
-`reset`, `pause`, `resume`, `return_home`, `release`, `clear_blocked`.
+`reset`, `pause`, `resume`, `return_home`, `release`, `clear_blocked`,
+`discharge`, and for loading `loading` (state + bins), `start_loading`
+(`order_id` opt.), `depart_permit`, `load_abort` (`reason`).
 Errors: `{"ok": false, "error": "..."}`.
 
 ---
@@ -313,7 +389,38 @@ on every call except `/api/health`. Interactive docs: `/docs`.
 | POST | `/api/orders/{id}/receive` | `{"lines":[{"line_id","ok","damaged","missing","notes"}],"notes","receiver"}` | closes the order |
 | GET | `/api/discrepancies` | `?resolved=false` | |
 | GET | `/api/agv` | | latest telemetry |
-| POST | `/api/agv/{estop,reset,pause,resume,return_home,release,clear_blocked}` | `{"data":{}}` | 409 if the AGV rejects |
+| POST | `/api/agv/{estop,reset,pause,resume,return_home,release,clear_blocked,discharge}` | `{"data":{}}` | 409 if the AGV rejects |
+| POST | `/api/scan` | `{"code":"APEX:NUT-M8","device":"phone1"}` | phone QR scan → `{"result",...}` |
+| GET | `/api/scan` | `?code=APEX:NUT-M8&key=<api_key>&device=phone1` | same, for apps that open a URL; returns a green/red HTML page |
+| GET | `/api/loading` | | current load: state, bins, last scan |
+| POST | `/api/loading/start` | `?order_id=` (opt.) | AGV must be docked + idle |
+| POST | `/api/loading/permit` | | departure permit (same as PLC `DEPART_PERMIT`) |
+| POST | `/api/loading/override` | `{"reason"}` | supervisor: depart without full scan / permit (audited) |
+| POST | `/api/loading/clear_wrong` | | wrong part removed, continue scanning |
+| POST | `/api/loading/abort` | `{"reason"}` | order back to Approved |
+| GET | `/api/returns` | | damaged items not yet back at the home station |
+| POST | `/api/returns/{id}/book` | | book a returned damaged item by hand |
 
 Errors: 400 business rule (message in `detail`), 401 bad key, 403 IP not
 allowed, 404 not found, 409 AGV rejected, 422 validation.
+
+### 5.1 Phone QR scanner (home-station loading)
+
+A phone mounted in the flexbase at the home station runs a QR scanner app.
+Each part (or its tote) carries a QR label `APEX:<part number>` (the prefix is
+`station.loading.qr_prefix`; a bare part number is accepted too). Configure
+the app to open / POST to the station after each scan, e.g.
+
+```
+http://192.168.1.10:8000/api/scan?key=<api_key>&device=flexbase&code=
+```
+
+(the app appends the decoded text). **[TBD: which scanner app the team uses
+and whether it can send a POST with a header; the GET form puts the API key
+in the URL, so use a separate key or the IP allow list on a shared network.]**
+
+Results: `ok` (counted against the bin), `wrong_part` (not on this order),
+`over_quantity` (more than ordered), `unknown_code`, `no_active_load`. Any
+error sets the load to **wrong pick**: the GUI and PLC (`LOAD_STATE` 4,
+`LAST_SCAN_RESULT`) show it, and departure is blocked until the operator
+confirms the wrong part was removed. Every scan is stored in `scan_log`.

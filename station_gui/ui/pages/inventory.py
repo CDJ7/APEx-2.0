@@ -86,13 +86,13 @@ class InventoryPage(Page):
 
         card = Card()
         self.model = DictTableModel(
-            [("id", "ID"), ("part_number", "Part #"), ("name", "Name"), ("description", "Description"),
-             ("location", "Location"), ("quantity", "On hand"), ("damaged_qty", "Damaged"),
+            [("id", "ID"), ("part_number", "Part #"), ("name", "Name"), ("location", "Location"), ("quantity", "On hand"), ("damaged_qty", "Damaged"),
              ("reorder_threshold", "Reorder at"), ("unit", "Unit"),
              ("status", "Status"), ("updated_at", "Last updated")],
             row_color=self._row_color,
             formatters={"updated_at": lambda v: (v or "")[:16].replace("T", " ")})
-        self.table = make_table(self.model, status_columns=["status"], stretch="description")
+        self.table = make_table(self.model, status_columns=["status"], stretch="name")
+        self.table.setToolTip("Double-click to edit (description, location, thresholds…)")
         self.table.doubleClicked.connect(lambda _i: self.edit_part())
         card.body.addWidget(self.table, 1)
         self.count = muted()

@@ -81,3 +81,41 @@ IDs (G-xx) are referenced by the Phase 3 commit messages.
 9. **G-23** One order line per bin, max six lines per trip?
 10. **G-24** What does the phone part-code scanner scan, and where?
 11. **G-26** Keep bumper inputs (not in BOM)?
+
+## Resolution after Phase 3 (team answers + code changes)
+
+Status: **Code** = fixed in the code/docs (commit) · **Report** = to be changed
+in the report (Phase 4, `APEX_Midterm_Report_v2.docx`) · **Open** = still
+needs data; a `[TBD]` placeholder stays in `config.yaml` / docs / report.
+
+| ID | Decision / outcome | Status |
+|---|---|---|
+| G-01 | Keep the Arduino Uno R4 WiFi as the motor/encoder/sensor slave. | Report (wiring + BOM); **Open**: Arduino cost / supplier |
+| G-02 | Station GUI on a separate station PC. | Report (architecture + BOM); **Open**: station PC = lab-provided? |
+| G-03 | Camera Module 3 stays a **forward obstacle detector**; load verification by a **phone QR scanner** in the flexbase. | Code (8c2c80b, 46524cf); Report (camera purpose, test plan) |
+| G-04 | CompactLogix 1769 system; "1769-ECR" is the end cap — controller catalog unknown; Modbus TCP Client AOI, port 502; PLC grants departure. | Code (cbffa11, 8c2c80b); docs/PLC_INTEGRATION.md; **Open**: controller catalog no. |
+| G-05 | MDD20A only, PWM/DIR. | Code (ecafd83) |
+| G-06 | `encoder_ticks_per_rev: 1948` (×2 decoding). | Code (cbffa11); **Open**: VERIFY with the 10-turn test |
+| G-07 | **Correction:** the original row said the R4 "still reads 3.3 V high reliably" — that is not guaranteed on a 5 V RA4M1. WIRING.md now requires a 3.3→5 V level shifter, or a 5 V encoder supply if the datasheet allows it. | Code/docs; **Open**: 5303 encoder supply range |
+| G-08 | Wheel 0.19304 m, length 0.70 m; track 0.50 m and width 0.62 m flagged. | Code (cbffa11); **Open**: measured track / overall width |
+| G-09 | 0.30 m/s limit, 1.31 m/s no-load wheel speed. | Code (cbffa11) |
+| G-10 | 24 V SLA; divider 56k/10k (6.6:1, A2 ≤ 3.9 V); report power tree in WIRING.md. | Code (cbffa11, ecafd83); **Open**: full/empty mV thresholds |
+| G-11 | Two IR sensors in front of the drive wheels (catch what the camera misses); analog or digital supported. | Code (cbffa11); **Open**: sensor model |
+| G-12 | NETGEAR N600 DGND3700v2 router; 192.168.1.x plan kept as placeholder; network table in WIRING.md. | Code/docs; Report (network table); **Open**: LAN subnet |
+| G-13 | New Arduino pin table (actuator D5/D6, Hall D11, i-BUS D0). | Code (ecafd83); Report (replace the Pi BCM table) |
+| G-14 | Every task: id, ack, timeout, completion result (order `result`, `task_failed`). | Code (19d7bee, 8c2c80b); Report |
+| G-15 | Report's K1/F5 hardwired E-stop adopted; A3 senses NC contact #2 / K1 aux; reset → paused. | Docs (WIRING.md); Report consistent |
+| G-16 | Station-link timeout 3 s → motion held, auto-resume. | Code (19d7bee) |
+| G-17 | Distances kept as placeholders. | **Open**: measured stopping / coast distance |
+| G-18 | LOADING and MANUAL states inhibit autonomous motion; DOCKING final approach. | Code (19d7bee) |
+| G-19 | Loading interlock: docked + QR-verified + PLC `DEPART_PERMIT`. | Code (8c2c80b) |
+| G-20 | Damaged parts ride back in the return bin; on docking they are booked into the **damaged inventory** (on-hand was already reduced at order submit) and the actuator tips the bin. | Code (19d7bee, 8c2c80b, 46524cf) |
+| G-21 | Hall sensor = charge / wait position; departure only when docked. | Code (ecafd83, 19d7bee); **Open**: sensor model |
+| G-22 | Flysky FS-i6 + FS-iA6B on i-BUS → Arduino manual override, Pi MANUAL. | Code (ecafd83, 19d7bee) |
+| G-23 | Max 6 parts per order, one per bin (KUKA must recognise errors). | Code (8c2c80b) |
+| G-24 | Phone in the flexbase scans part QR codes → `/api/scan`. | Code (8c2c80b); **Open**: scanner app |
+| G-25 | Task timeout (`task_timeout_s` 900) and results. | Code (19d7bee, 8c2c80b) |
+| G-26 | Watchdog kept; bumper inputs kept but disabled (`BUMPERS_FITTED 0`). | Code (ecafd83); Report |
+| G-27…G-31 | Software features to be described in the report. | Report |
+| G-32 | gpiozero + lgpio note (Pi GPIO unused for AGV I/O now). | Report |
+| G-33 | "15-to-22-pin Standard-Mini cable" wording. | Docs (PI_SETUP.md, WIRING.md) |
