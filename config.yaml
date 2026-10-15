@@ -95,6 +95,7 @@ agv:
     heartbeat_ms: 100          # Pi -> Arduino heartbeat period
     watchdog_ms: 500           # must match WATCHDOG_MS in the sketch
     status_timeout_s: 0.5      # Pi faults if STAT frames stop arriving
+    ramp_pwm_per_s: 600        # acceleration ramp applied by the Arduino (CFG command)
     reconnect_s: 2.0
 
   robot:                       # VERIFY all of these on the real chassis
@@ -153,6 +154,8 @@ agv:
     blocked_segment_expiry_s: 0        # 0 = blocked segments stay blocked until cleared
     arrived_dwell_s: 0                 # 0 = wait at destination for 'release'; >0 auto-return
     grid_inflation_m: 0.25
+    obstacle_stop_distance_m: 0.50     # path obstacle closer than this (from the bumper) -> stop & wait
+    obstacle_clear_s: 1.0              # path must be clear this long before driving on
 
   safety:
     stop_distance_m: 0.35      # any sensor: obstacle closer than this -> immediate stop
@@ -202,7 +205,7 @@ agv:
 # Simulation (laptop demo without hardware)
 # -----------------------------------------------------------------------------
 simulation:
-  world_png: "agv_pi/maps/sim_warehouse.png"
+  world_yaml: "agv_pi/maps/sim_warehouse.yaml"   # ground truth for the simulator
   start_station: "MAIN"
   speed_factor: 1.0
   lidar_noise_m: 0.01

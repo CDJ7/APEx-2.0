@@ -1,0 +1,31 @@
+# APEX AGV master controller - starts at boot on the Raspberry Pi 5.
+#   sudo cp agv_pi/systemd/apex-agv.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now apex-agv
+#   journalctl -u apex-agv -f          (logs also go to ~/Senior-Design/apex-agv/logs/agv_pi.log)
+# Paths assume the repo is cloned to /home/apex/Senior-Design for user "apex" -
+# adjust User/WorkingDirectory/ExecStart if yours differ.
+
+[Unit]
+Description=APEX Systems AGV controller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=apex
+Group=apex
+SupplementaryGroups=dialout video gpio
+WorkingDirectory=/home/apex/Senior-Design/apex-agv
+Environment=PYTHONUNBUFFERED=1
+# Secrets can live in this file instead of config.yaml (APEX_AGV_TOKEN=...)
+EnvironmentFile=-/etc/default/apex-agv
+ExecStart=/home/apex/Senior-Design/apex-agv/.venv/bin/python -m agv_pi.main
+Restart=on-failure
+RestartSec=3
+# Give the controller time to stop the motors on shutdown
+TimeoutStopSec=10
+KillSignal=SIGTERM
+Nice=-5
+
+[Install]
+WantedBy=multi-user.target

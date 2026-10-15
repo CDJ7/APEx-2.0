@@ -1,0 +1,16 @@
+# APEX AGV stable device names.  Install:
+#   sudo cp agv_pi/udev/99-apex-agv.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#
+# Verify the IDs on YOUR hardware with:
+#   udevadm info -a -n /dev/ttyUSB0 | grep -E "idVendor|idProduct|serial"
+#   udevadm info -a -n /dev/ttyACM0 | grep -E "idVendor|idProduct|serial"
+# If two devices share a VID:PID, add  ATTRS{serial}=="<serial>"  to the rule.
+
+# Slamtec RPLIDAR A1M8 via its Silicon Labs CP2102 USB-UART adapter -> /dev/rplidar
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", SYMLINK+="rplidar", MODE="0660", GROUP="dialout"
+
+# Arduino UNO R4 WiFi (USB via its ESP32-S3 bridge) -> /dev/arduino
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2341", ATTRS{idProduct}=="1002", SYMLINK+="arduino", MODE="0660", GROUP="dialout"
+# Arduino UNO R4 Minima (if used instead)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2341", ATTRS{idProduct}=="0069", SYMLINK+="arduino", MODE="0660", GROUP="dialout"
