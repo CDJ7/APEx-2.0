@@ -83,7 +83,11 @@ class SimWorld:
         self.vr = 0.0
         self.wheel_dist = [0.0, 0.0]       # measured (noisy) wheel travel, for the encoders
         self.estop = False                 # simulated hardware E-stop button
-        self.bumper = 0
+        self.bumper = 0                    # contact with an obstacle (only used if bumpers are fitted)
+        self.dock_pose: Pose2D | None = start   # Hall magnet at the home station
+        self.dock_radius = 0.05            # Hall sensor switching radius (m)
+        self.rc_manual = False             # simulated Flysky SwA manual override (sticks centred)
+        self.actuator_pos = 0.0            # return-bin actuator stroke 0 (retracted) .. 1 (extended)
         self.collided = False
         self.obstacles: list[SimObstacle] = []
         self._ids = itertools.count(1)
@@ -214,6 +218,13 @@ class SimWorld:
             before = len(self.obstacles)
             self.obstacles = [] if obstacle_id is None else [o for o in self.obstacles if o.id != obstacle_id]
             return before - len(self.obstacles)
+
+    def docked(self) -> bool:
+        """Hall sensor: true when the robot centre is over the home-dock magnet."""
+        if self.dock_pose is None:
+            return False
+        p = self.truth()
+        return math.hypot(p.x - self.dock_pose.x, p.y - self.dock_pose.y) <= self.dock_radius
 
     def set_pose(self, pose: Pose2D) -> None:
         with self._lock:

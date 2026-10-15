@@ -19,14 +19,16 @@ from agv_pi.sensors.ir import sharp_cm_to_volts
 from agv_pi.sim.world import SimWorld
 from common.protocol import serial_protocol as sp
 
-FW_VERSION = "sim-1.0.0"
+FW_VERSION = "sim-2.0.0"
+ACT_SPEED = 0.25                     # simulated actuator stroke fraction per second
 TICK_S = 0.005                       # 200 Hz firmware loop
 
 
 class SimArduinoSerial:
     """pyserial-compatible fake port backed by a simulated firmware thread."""
 
-    def __init__(self, world: SimWorld, ir_digital: bool = False, timeout: float = 0.02):
+    def __init__(self, world: SimWorld, ir_digital: bool = False, timeout: float = 0.02,
+                 bumpers_fitted: bool = False):
         self.world = world
         self.timeout = timeout
         self.ir_digital = ir_digital
@@ -44,6 +46,10 @@ class SimArduinoSerial:
         self.fault = sp.FaultFlags.NONE
         self.estop_active = False
         self.bumper = 0
+        self.bumpers_fitted = bumpers_fitted
+        self.act_dir = 0
+        self.act_until = 0.0
+        self.manual = False
         self.armed = False
         self.last_cmd = time.monotonic()
         self.hb_seq = 0
@@ -112,10 +118,11 @@ class SimArduinoSerial:
             elif f.name == "CMD":
                 left, right = f.ints()
                 self._mark_valid()
-                if not self.fault and not self.estop_active:
+                if not self.fault and not self.estop_active and not self.manual:
                     self.target = [max(-255, min(255, left)), max(-255, min(255, right))]
             elif f.name == "STOP":
                 self._hard_stop()
+                self.act_dir = 0
                 self._mark_valid()
             elif f.name == "CLR":
                 keep = sp.FaultFlags.NONE
@@ -137,6 +144,16 @@ class SimArduinoSerial:
                     raise ValueError
                 self.ramp, self.stat_ms = float(ramp), stat_ms
                 self._send(sp.encode_frame("ACK", "CFG"))
+            elif f.name == "ACT":
+                direction, ms = f.ints()
+                if direction not in (-1, 0, 1) or not 0 <= ms <= 15000:
+                    raise ValueError
+                if direction and (self.fault or self.estop_active or self.manual):
+                    self._send(sp.encode_frame("ERR", sp.ErrCode.REJECTED, "ACT"))
+                    return
+                self.act_dir = direction
+                self.act_until = time.monotonic() + ms / 1000.0
+                self._send(sp.encode_frame("ACK", "ACT"))
             elif f.name == "PING":
                 self._send(sp.encode_frame("PONG", FW_VERSION))
             else:
@@ -178,12 +195,21 @@ class SimArduinoSerial:
                     self._hard_stop()
                 elif not self.world.estop:
                     self.estop_active = False
-                b = self.world.bumper
+                b = self.world.bumper if self.bumpers_fitted else 0
                 if b and not self.bumper:
                     self.fault |= sp.FaultFlags.BUMPER
                     self._hard_stop()
                 self.bumper = b
-                if self.armed and (now - self.last_cmd) * 1000 > sp.WATCHDOG_MS:
+                if self.world.rc_manual != self.manual:      # RC override hand-over
+                    self.manual = self.world.rc_manual
+                    self._hard_stop()
+                    if not self.manual:
+                        self.armed = False
+                if self.act_dir and (now >= self.act_until or self.fault or self.estop_active or self.manual):
+                    self.act_dir = 0
+                if self.act_dir:
+                    self.world.actuator_pos = min(1.0, max(0.0, self.world.actuator_pos + self.act_dir * ACT_SPEED * dt))
+                if not self.manual and self.armed and (now - self.last_cmd) * 1000 > sp.WATCHDOG_MS:
                     if not self.fault & sp.FaultFlags.WATCHDOG:
                         self.fault |= sp.FaultFlags.WATCHDOG
                         self._hard_stop()
@@ -217,6 +243,7 @@ class SimArduinoSerial:
                         speed_left=self._speeds[0], speed_right=self._speeds[1],
                         ir1=ir1, ir2=ir2, bumper=self.bumper, estop=self.estop_active,
                         fault=self.fault, pwm_left=pwm[0], pwm_right=pwm[1],
-                        vbat_mv=int(12400 - (now - self._t0) * 0.5), hb_seq=self.hb_seq,
+                        vbat_mv=int(25400 - (now - self._t0) * 0.5), hb_seq=self.hb_seq,
+                        dock=self.world.docked(), rc=2 if self.manual else 0, act=self.act_dir,
                     )
                 self._send(st.to_frame())

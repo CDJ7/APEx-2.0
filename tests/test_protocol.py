@@ -36,8 +36,18 @@ def test_bare_stop_allowed():
 
 def test_status_roundtrip():
     st = sp.StatusReport(1234, 100, -50, 10, -5, 512, 300, 1, True, sp.FaultFlags.ESTOP | sp.FaultFlags.WATCHDOG,
-                         80, -80, 12000, 42)
-    assert sp.StatusReport.from_frame(sp.parse_frame(st.to_frame())) == st
+                         80, -80, 25100, 42, dock=True, rc=2, act=-1)
+    back = sp.StatusReport.from_frame(sp.parse_frame(st.to_frame()))
+    assert back == st and back.manual
+    # worst-case field widths must still fit in one frame
+    big = sp.StatusReport(4294967295, -2147483648, -2147483648, -99999, -99999, 1023, 1023, 3, True,
+                          sp.FaultFlags(7), -255, -255, 65535, 65535, True, 2, -1)
+    assert len(big.to_frame()) <= sp.MAX_LINE
+
+
+def test_actuator_frame():
+    assert sp.parse_frame(sp.make_actuator(5, 99999)).ints() == [1, 15000]
+    assert sp.parse_frame(sp.make_actuator(-1, 3000)).ints() == [-1, 3000]
 
 
 def test_line_assembler_handles_split_and_overflow():

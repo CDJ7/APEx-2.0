@@ -1,20 +1,25 @@
 /*
  * ============================================================================
- *  APEX Systems AGV  -  Arduino Uno R4 WiFi low-level controller firmware
+ *  APEx Systems AGV  -  Arduino Uno R4 WiFi low-level controller firmware
  * ============================================================================
  *
  *  ROLE: SLAVE to the Raspberry Pi 5 (connected by USB serial, 115200 8N1).
- *        This firmware executes motion commands and reports sensor data.
- *        It makes NO navigation decisions. Its only autonomous actions are
- *        safety reflexes: hardware E-stop, bumpers and the command watchdog.
+ *        This firmware executes motion/actuator commands and reports sensor
+ *        data. It makes NO navigation decisions. Its only autonomous actions
+ *        are safety reflexes (hardware E-stop, optional bumpers, command
+ *        watchdog) and the operator's manual RC override for commissioning.
  *
- *  Responsibilities
- *    - Left/right drive motor PWM + direction with acceleration ramping
- *    - Quadrature wheel encoders (interrupts), ticks and ticks/s
- *    - Analog (Sharp GP2Y0A21) or digital front IR sensors, bumper switches
- *    - Hardware E-stop input -> motors cut immediately, regardless of the Pi
- *    - Watchdog: no valid HB/CMD from the Pi for 500 ms -> stop + fault
- *    - Built-in 12x8 LED matrix shows IDLE / MOVING / FAULT / E-STOP
+ *  Hardware (see docs/WIRING.md and the midterm report):
+ *    - Cytron MDD20A dual motor driver, PWM/DIR inputs (20 A cont / 60 A peak)
+ *    - 2 x goBILDA 5303-2402-0139 planetary gear motors (139:1) with built-in
+ *      quadrature encoders (~3,896 counts/output rev with x4 decoding)
+ *    - 2 x front IR sensors in front of the drive wheels (analog or digital)
+ *    - Hall-effect sensor: home-dock (charging / waiting) position
+ *    - Linear actuator for the return bin via a forward/reverse relay pair
+ *    - Flysky FS-i6 transmitter + FS-iA6B receiver on i-BUS (Serial1, D0)
+ *    - Hardwired E-stop: NC contact #1 drops contactor K1 (motion power);
+ *      NC contact #2 / K1 auxiliary is sensed on A3
+ *    - 24 V 12 Ah SLA battery (OSI OSA170) via a 56k/10k divider on A2
  *
  *  Protocol (must match common/protocol/serial_protocol.py, docs/PROTOCOL.md)
  *    Frame:  <BODY>*<CS>\n     CS = XOR of all BODY bytes, 2 upper-case hex
@@ -25,11 +30,12 @@
  *      CLR                    clear latched faults (if cause is gone) -> ACK,CLR
  *      RST                    zero encoders                            -> ACK,RST
  *      CFG,<ramp>,<stat_ms>   ramp PWM/s (1..5000), STAT period 20..1000 -> ACK,CFG
+ *      ACT,<dir>,<ms>         actuator 1 extend / -1 retract / 0 stop    -> ACK,ACT
  *      PING                   -> PONG,<fw>
  *    Arduino -> Pi:
  *      BOOT,<fw>
  *      STAT,<ms>,<encL>,<encR>,<spdL>,<spdR>,<ir1>,<ir2>,<bump>,<estop>,
- *           <fault>,<pwmL>,<pwmR>,<vbat_mv>,<hb_seq>
+ *           <fault>,<pwmL>,<pwmR>,<vbat_mv>,<hb_seq>,<dock>,<rc>,<act>
  *      ACK,<name>   ERR,<code>,<detail>   PONG,<fw>
  *    Examples (checksums verified by tests/test_protocol.py):
  *      CMD,120,-80*5C    STOP*18    HB,7*11
@@ -47,22 +53,17 @@
 //  CONFIGURATION  -  edit this block only
 // ============================================================================
 
-#define FW_VERSION "1.0.0"
+#define FW_VERSION "2.0.0"
 
-// ---- Motor driver type: choose exactly ONE --------------------------------
-//  DRIVER_PWM_DIR : one PWM + one DIR pin per motor (Cytron MDD10A, MD13S, ...)
-//  DRIVER_L298N   : EN (PWM) + IN1 + IN2 per motor (L298N, L293D, TB6612 w/ STBY high)
-//  DRIVER_BTS7960 : two PWM pins per motor, RPWM forward / LPWM reverse (IBT-2)
-#define DRIVER_PWM_DIR
-// #define DRIVER_L298N
-// #define DRIVER_BTS7960
-
-// ---- IR sensor type: choose exactly ONE ------------------------------------
-#define IR_ANALOG            // Sharp GP2Y0A21 etc. -> raw ADC 0..1023 reported
+// ---- Front IR sensor type: choose exactly ONE --------------------------------
+#define IR_ANALOG            // analog distance sensors -> raw ADC 0..1023 reported
 // #define IR_DIGITAL        // active-LOW obstacle modules -> 1 = obstacle
 
-#define USE_LED_MATRIX 1     // 1 = show status on the built-in LED matrix
-#define VBAT_ENABLED   1     // 1 = battery voltage divider wired to PIN_VBAT
+#define USE_LED_MATRIX  1    // 1 = show status on the built-in LED matrix
+#define VBAT_ENABLED    1    // 1 = battery voltage divider wired to PIN_VBAT
+#define RC_ENABLED      1    // 1 = Flysky FS-iA6B i-BUS on Serial1 (D0)
+#define BUMPERS_FITTED  0    // 1 = bumper switches wired to A4/A5 (not in the current BOM)
+#define RELAY_ACTIVE_LOW 1   // 1 = relay module energises on LOW (most opto relay boards)
 
 // ============================================================================
 //  PIN ASSIGNMENTS  (see docs/WIRING.md for the full wiring table)
@@ -70,41 +71,31 @@
 //  Uno R4 interrupt-capable pins: D0 D1 D2 D3 D8 D12 D13 A1..A5
 //  Uno R4 PWM pins:               D3 D5 D6 D9 D10 D11
 
-// Wheel encoders (channel A on an interrupt pin, channel B plain input)
+// Wheel encoders, goBILDA 5303 (channel A on an interrupt pin, B plain input)
 const uint8_t PIN_ENC_L_A = 2;
 const uint8_t PIN_ENC_L_B = 4;
 const uint8_t PIN_ENC_R_A = 3;
 const uint8_t PIN_ENC_R_B = 7;
 
-#if defined(DRIVER_PWM_DIR)
-const uint8_t PIN_MOT_L_PWM = 9;
-const uint8_t PIN_MOT_L_DIR = 8;
-const uint8_t PIN_MOT_R_PWM = 10;
-const uint8_t PIN_MOT_R_DIR = 12;
-#elif defined(DRIVER_L298N)
-const uint8_t PIN_MOT_L_EN  = 9;    // ENA (remove the jumper on the L298N)
-const uint8_t PIN_MOT_L_IN1 = 8;
-const uint8_t PIN_MOT_L_IN2 = 11;
-const uint8_t PIN_MOT_R_EN  = 10;   // ENB
-const uint8_t PIN_MOT_R_IN1 = 12;   // IN3
-const uint8_t PIN_MOT_R_IN2 = 6;    // IN4
-#elif defined(DRIVER_BTS7960)
-const uint8_t PIN_MOT_L_RPWM = 9;   // forward
-const uint8_t PIN_MOT_L_LPWM = 5;   // reverse
-const uint8_t PIN_MOT_R_RPWM = 10;
-const uint8_t PIN_MOT_R_LPWM = 6;
-// R_EN / L_EN of both IBT-2 boards: tie to 5 V (or to the E-stop relay output)
-#else
-#error "Select a motor driver type"
-#endif
+// Cytron MDD20A (PWM/DIR mode)
+const uint8_t PIN_MOT_L_PWM = 9;    // MDD20A PWM1
+const uint8_t PIN_MOT_L_DIR = 8;    // MDD20A DIR1
+const uint8_t PIN_MOT_R_PWM = 10;   // MDD20A PWM2
+const uint8_t PIN_MOT_R_DIR = 12;   // MDD20A DIR2
+
+// Return-bin linear actuator (forward/reverse relay pair, interlocked in software)
+const uint8_t PIN_ACT_EXTEND  = 5;
+const uint8_t PIN_ACT_RETRACT = 6;
 
 // Sensors
-const uint8_t PIN_IR_1     = A0;    // front-left IR
+const uint8_t PIN_DOCK     = 11;    // Hall-effect home-dock sensor (open collector, LOW = magnet)
+const uint8_t PIN_IR_1     = A0;    // front-left IR (in front of the left drive wheel)
 const uint8_t PIN_IR_2     = A1;    // front-right IR
-const uint8_t PIN_VBAT     = A2;    // battery divider
-const uint8_t PIN_ESTOP    = A3;    // E-stop NC contact to GND (INPUT_PULLUP: HIGH = STOP)
-const uint8_t PIN_BUMPER_L = A4;    // NO switch to GND (LOW = pressed)
+const uint8_t PIN_VBAT     = A2;    // battery divider 56k / 10k
+const uint8_t PIN_ESTOP    = A3;    // E-stop NC contact #2 / K1 aux to GND (INPUT_PULLUP: HIGH = STOP)
+const uint8_t PIN_BUMPER_L = A4;    // optional NO switch to GND (LOW = pressed)
 const uint8_t PIN_BUMPER_R = A5;
+// D0 = Serial1 RX  <- FS-iA6B i-BUS "SERVO" output (signal only; D1 TX unused)
 
 // ---- Direction / polarity --------------------------------------------------
 // Flip these so that a positive PWM drives the wheel FORWARD and forward
@@ -121,10 +112,22 @@ const uint32_t SPEED_WINDOW_MS    = 50;    // encoder speed update period
 const uint32_t ESTOP_RELEASE_MS   = 50;    // E-stop must read released this long
 const uint16_t DEFAULT_RAMP_PWM_S = 600;   // PWM units per second (0 -> 255 in ~0.4 s)
 const int      PWM_MAX            = 255;
+const uint32_t ACT_MAX_MS         = 15000; // longest single actuator run
+const uint32_t DOCK_DEBOUNCE_MS   = 30;
+
+// ---- Manual RC (Flysky FS-i6 / FS-iA6B, i-BUS) ------------------------------
+const uint32_t RC_TIMEOUT_MS   = 100;      // no fresh frame -> signal lost
+const uint8_t  RC_CH_STEER     = 0;        // CH1 (right stick horizontal, mode 2)
+const uint8_t  RC_CH_THROTTLE  = 1;        // CH2 (right stick vertical)
+const uint8_t  RC_CH_ENABLE    = 4;        // CH5 = SwA: manual override switch
+const uint16_t RC_ENABLE_ABOVE = 1700;     // us; switch "on"
+const uint16_t RC_DEADBAND_US  = 30;
+const int      RC_MAX_PWM      = 120;      // manual speed limit (keep low for commissioning)
 
 // ---- Battery divider -------------------------------------------------------
+// 24 V SLA charges up to ~28.8 V: 28.8 V / 6.6 = 4.36 V on A2 (< 5 V max).
 const float ADC_VREF_MV     = 5000.0f;     // R4 analog reference (default 5 V)
-const float VBAT_DIVIDER    = 4.0f;        // (R1+R2)/R2, e.g. 30k/10k   VERIFY
+const float VBAT_DIVIDER    = 6.6f;        // (R1+R2)/R2 = (56k+10k)/10k   VERIFY with a meter
 
 // ============================================================================
 //  END OF CONFIGURATION
@@ -150,6 +153,7 @@ const uint8_t ERR_CHECKSUM      = 1;
 const uint8_t ERR_UNKNOWN_CMD   = 2;
 const uint8_t ERR_BAD_ARGS      = 3;
 const uint8_t ERR_LINE_TOO_LONG = 4;
+const uint8_t ERR_REJECTED      = 5;
 
 // ---------------------------------------------------------------- state
 volatile int32_t encTicksL = 0;    // written in ISRs
@@ -159,7 +163,7 @@ int32_t  lastSpeedTicksL = 0, lastSpeedTicksR = 0;
 int32_t  speedL = 0, speedR = 0;   // ticks per second
 uint32_t lastSpeedMs = 0;
 
-int      targetPwmL = 0, targetPwmR = 0;   // requested by the Pi
+int      targetPwmL = 0, targetPwmR = 0;   // requested by the Pi (or the RC sticks)
 float    currentPwmL = 0, currentPwmR = 0; // after ramping
 uint32_t lastRampUs = 0;
 uint16_t rampPwmPerS = DEFAULT_RAMP_PWM_S;
@@ -176,10 +180,24 @@ bool     estopActive = false;      // live (debounced on release) E-stop input
 uint32_t estopReleasedSinceMs = 0;
 uint8_t  bumperBits = 0;
 
+bool     docked = false;           // debounced Hall input
+bool     dockRaw = false;
+uint32_t dockChangedMs = 0;
+
+int8_t   actDir = 0;               // 1 extend, -1 retract, 0 idle
+uint32_t actStartMs = 0, actRunMs = 0;
+
+uint16_t rcCh[14];                 // i-BUS channels (us)
+uint32_t rcLastFrameMs = 0;
+bool     rcSeen = false;
+bool     manualActive = false;     // RC override driving the motors
+uint8_t  ibusBuf[32];
+uint8_t  ibusLen = 0;
+
 int      ir1 = 0, ir2 = 0;
 uint16_t vbatMv = 0;
 
-const size_t RX_MAX = 96;          // matches MAX_LINE in serial_protocol.py
+const size_t RX_MAX = 128;         // matches MAX_LINE in serial_protocol.py
 char     rxBuf[RX_MAX + 1];
 size_t   rxLen = 0;
 bool     rxDiscarding = false;
@@ -212,28 +230,13 @@ void readEncoders(int32_t &l, int32_t &r) {
 }
 
 // ============================================================================
-//  Motors
+//  Motors (Cytron MDD20A, PWM/DIR). PWM = 0 brakes while the driver is powered.
 // ============================================================================
 void writeMotor(bool left, int pwm) {
   pwm = constrain(pwm, -PWM_MAX, PWM_MAX);
   if (left ? INVERT_MOTOR_L : INVERT_MOTOR_R) pwm = -pwm;
-  int mag = abs(pwm);
-#if defined(DRIVER_PWM_DIR)
   digitalWrite(left ? PIN_MOT_L_DIR : PIN_MOT_R_DIR, pwm >= 0 ? HIGH : LOW);
-  analogWrite(left ? PIN_MOT_L_PWM : PIN_MOT_R_PWM, mag);
-#elif defined(DRIVER_L298N)
-  uint8_t in1 = left ? PIN_MOT_L_IN1 : PIN_MOT_R_IN1;
-  uint8_t in2 = left ? PIN_MOT_L_IN2 : PIN_MOT_R_IN2;
-  if (pwm > 0)      { digitalWrite(in1, HIGH); digitalWrite(in2, LOW); }
-  else if (pwm < 0) { digitalWrite(in1, LOW);  digitalWrite(in2, HIGH); }
-  else              { digitalWrite(in1, LOW);  digitalWrite(in2, LOW); }   // coast
-  analogWrite(left ? PIN_MOT_L_EN : PIN_MOT_R_EN, mag);
-#elif defined(DRIVER_BTS7960)
-  uint8_t fwd = left ? PIN_MOT_L_RPWM : PIN_MOT_R_RPWM;
-  uint8_t rev = left ? PIN_MOT_L_LPWM : PIN_MOT_R_LPWM;
-  if (pwm >= 0) { analogWrite(rev, 0); analogWrite(fwd, mag); }
-  else          { analogWrite(fwd, 0); analogWrite(rev, mag); }
-#endif
+  analogWrite(left ? PIN_MOT_L_PWM : PIN_MOT_R_PWM, abs(pwm));
 }
 
 /** Stop immediately (no ramp) and forget the targets. */
@@ -266,6 +269,89 @@ void updateRamp() {
 }
 
 // ============================================================================
+//  Return-bin actuator (relays interlocked: never both energised)
+// ============================================================================
+void relayWrite(uint8_t pin, bool on) {
+  digitalWrite(pin, (on ^ RELAY_ACTIVE_LOW) ? HIGH : LOW);
+}
+
+void actuatorStop() {
+  relayWrite(PIN_ACT_EXTEND, false);
+  relayWrite(PIN_ACT_RETRACT, false);
+  actDir = 0;
+}
+
+void actuatorStart(int8_t dir, uint32_t ms) {
+  actuatorStop();                          // break before make
+  if (dir == 0 || ms == 0) return;
+  actDir = dir;
+  actStartMs = millis();
+  actRunMs = min(ms, ACT_MAX_MS);
+  relayWrite(dir > 0 ? PIN_ACT_EXTEND : PIN_ACT_RETRACT, true);
+}
+
+void updateActuator() {
+  if (actDir == 0) return;
+  if (faultFlags || estopActive || manualActive || millis() - actStartMs >= actRunMs) actuatorStop();
+}
+
+// ============================================================================
+//  Flysky FS-iA6B i-BUS (115200 8N1, 32-byte frames: 0x20 0x40, 14 x uint16 LE,
+//  checksum = 0xFFFF - sum of the first 30 bytes)
+// ============================================================================
+void pollIbus() {
+#if RC_ENABLED
+  while (Serial1.available() > 0) {
+    uint8_t b = (uint8_t)Serial1.read();
+    if (ibusLen == 0 && b != 0x20) continue;
+    if (ibusLen == 1 && b != 0x40) { ibusLen = 0; continue; }
+    ibusBuf[ibusLen++] = b;
+    if (ibusLen == 32) {
+      uint16_t sum = 0xFFFF;
+      for (uint8_t i = 0; i < 30; i++) sum -= ibusBuf[i];
+      uint16_t cs = ibusBuf[30] | (ibusBuf[31] << 8);
+      if (sum == cs) {
+        for (uint8_t c = 0; c < 14; c++) rcCh[c] = ibusBuf[2 + 2 * c] | (ibusBuf[3 + 2 * c] << 8);
+        rcLastFrameMs = millis();
+        rcSeen = true;
+      }
+      ibusLen = 0;
+    }
+  }
+#endif
+}
+
+bool rcValid() {
+  return rcSeen && (millis() - rcLastFrameMs) < RC_TIMEOUT_MS;
+}
+
+int stickToPwm(uint16_t us) {
+  int v = (int)us - 1500;
+  if (abs(v) < (int)RC_DEADBAND_US) return 0;
+  return constrain(v * RC_MAX_PWM / 500, -RC_MAX_PWM, RC_MAX_PWM);
+}
+
+/** Manual commissioning: operator drives with the sticks while SwA is on. */
+void updateManual() {
+  bool want = rcValid() && rcCh[RC_CH_ENABLE] > RC_ENABLE_ABOVE;
+  if (want != manualActive) {
+    manualActive = want;
+    hardStop();                            // clean hand-over in both directions
+    if (!want) watchdogArmed = false;      // the Pi re-arms with its next HB/CMD
+  }
+  if (!manualActive) return;
+  int thr = stickToPwm(rcCh[RC_CH_THROTTLE]);
+  int str = stickToPwm(rcCh[RC_CH_STEER]);
+  targetPwmL = constrain(thr + str, -RC_MAX_PWM, RC_MAX_PWM);
+  targetPwmR = constrain(thr - str, -RC_MAX_PWM, RC_MAX_PWM);
+}
+
+uint8_t rcState() {
+  if (manualActive) return 2;
+  return rcValid() ? 1 : 0;
+}
+
+// ============================================================================
 //  Serial protocol
 // ============================================================================
 uint8_t xorChecksum(const char *s, size_t n) {
@@ -278,7 +364,7 @@ uint8_t xorChecksum(const char *s, size_t n) {
  * Send BODY*CS\n.
  * On the UNO R4 WiFi, `Serial` is a hardware UART to the on-board ESP32-S3
  * USB bridge, so it always drains at line rate even if the Pi is not reading.
- * Budget: a STAT frame (~90 bytes) at 20 Hz uses ~16 % of 115200 baud, so
+ * Budget: a STAT frame (~100 bytes) at 20 Hz uses ~17 % of 115200 baud, so
  * writes never stall the loop.
  */
 void sendFrame(const char *body) {
@@ -324,13 +410,15 @@ void handleCommand(char *fields[], int count) {
       sendError(ERR_BAD_ARGS, "CMD"); return;
     }
     markValidCommand();
-    if (faultFlags == 0 && !estopActive) {   // ignored while a fault is latched
+    // ignored while a fault is latched or the RC override has control
+    if (faultFlags == 0 && !estopActive && !manualActive) {
       targetPwmL = constrain((int)l, -PWM_MAX, PWM_MAX);
       targetPwmR = constrain((int)r, -PWM_MAX, PWM_MAX);
     }
 
   } else if (strcmp(name, "STOP") == 0) {
     hardStop();
+    actuatorStop();
     markValidCommand();
 
   } else if (strcmp(name, "CLR") == 0) {
@@ -360,6 +448,16 @@ void handleCommand(char *fields[], int count) {
     statPeriodMs = (uint32_t)statMs;
     sendFrame("ACK,CFG");
 
+  } else if (strcmp(name, "ACT") == 0) {
+    long dir, ms;
+    if (count != 3 || !parseLong(fields[1], dir) || !parseLong(fields[2], ms) ||
+        dir < -1 || dir > 1 || ms < 0 || ms > (long)ACT_MAX_MS) {
+      sendError(ERR_BAD_ARGS, "ACT"); return;
+    }
+    if (dir != 0 && (faultFlags || estopActive || manualActive)) { sendError(ERR_REJECTED, "ACT"); return; }
+    actuatorStart((int8_t)dir, (uint32_t)ms);
+    sendFrame("ACK,ACT");
+
   } else if (strcmp(name, "PING") == 0) {
     sendFrame("PONG," FW_VERSION);
 
@@ -372,6 +470,7 @@ void handleCommand(char *fields[], int count) {
 void processLine(char *line) {
   if (strcmp(line, "STOP") == 0) {           // bare STOP always accepted (safe)
     hardStop();
+    actuatorStop();
     markValidCommand();
     return;
   }
@@ -423,12 +522,14 @@ void updateSafetyInputs() {
 
   // E-stop: NC contact to GND with pull-up. HIGH = pressed OR wire broken
   // (fail-safe). Trip instantly, release only after ESTOP_RELEASE_MS stable.
+  // (Contact #1 of the same button drops contactor K1 in hardware.)
   bool raw = digitalRead(PIN_ESTOP) == HIGH;
   if (raw) {
     if (!estopActive) {
       estopActive = true;
       faultFlags |= FAULT_ESTOP;
       hardStop();
+      actuatorStop();
     }
     estopReleasedSinceMs = 0;
   } else if (estopActive) {
@@ -436,7 +537,7 @@ void updateSafetyInputs() {
     else if (now - estopReleasedSinceMs >= ESTOP_RELEASE_MS) estopActive = false;  // fault stays latched until CLR
   }
 
-  // Bumpers (NO to GND): pressed -> stop + latch.
+#if BUMPERS_FITTED
   uint8_t b = 0;
   if (digitalRead(PIN_BUMPER_L) == LOW) b |= 1;
   if (digitalRead(PIN_BUMPER_R) == LOW) b |= 2;
@@ -445,15 +546,22 @@ void updateSafetyInputs() {
     hardStop();
   }
   bumperBits = b;
+#endif
 
-  // Command watchdog.
-  if (watchdogArmed && (now - lastValidCmdMs > WATCHDOG_MS)) {
+  // Command watchdog (not applied while the operator drives with the RC override).
+  if (!manualActive && watchdogArmed && (now - lastValidCmdMs > WATCHDOG_MS)) {
     if (!(faultFlags & FAULT_WATCHDOG)) {
       faultFlags |= FAULT_WATCHDOG;
       hardStop();
+      actuatorStop();
     }
     watchdogArmed = false;   // re-armed by the next valid HB/CMD; fault needs CLR
   }
+
+  // Hall-effect home-dock sensor (debounced)
+  bool d = digitalRead(PIN_DOCK) == LOW;
+  if (d != dockRaw) { dockRaw = d; dockChangedMs = now; }
+  if (dockRaw != docked && now - dockChangedMs >= DOCK_DEBOUNCE_MS) docked = dockRaw;
 }
 
 void updateSpeeds() {
@@ -488,10 +596,11 @@ void sendStatus() {
   int32_t l, r;
   readEncoders(l, r);
   char body[RX_MAX];
-  snprintf(body, sizeof(body), "STAT,%lu,%ld,%ld,%ld,%ld,%d,%d,%u,%u,%u,%d,%d,%u,%u",
+  snprintf(body, sizeof(body), "STAT,%lu,%ld,%ld,%ld,%ld,%d,%d,%u,%u,%u,%d,%d,%u,%u,%u,%u,%d",
            (unsigned long)millis(), (long)l, (long)r, (long)speedL, (long)speedR,
            ir1, ir2, bumperBits, estopActive ? 1u : 0u, faultFlags,
-           (int)lroundf(currentPwmL), (int)lroundf(currentPwmR), vbatMv, lastHbSeq);
+           (int)lroundf(currentPwmL), (int)lroundf(currentPwmR), vbatMv, lastHbSeq,
+           docked ? 1u : 0u, rcState(), (int)actDir);
   sendFrame(body);
 }
 
@@ -517,18 +626,13 @@ void updateLed() {
 //  setup / loop
 // ============================================================================
 void setup() {
-  // Motors first, so the outputs are driven LOW as early as possible.
-#if defined(DRIVER_PWM_DIR)
+  // Motor and relay outputs first, so they are driven safe as early as possible.
   pinMode(PIN_MOT_L_PWM, OUTPUT); pinMode(PIN_MOT_L_DIR, OUTPUT);
   pinMode(PIN_MOT_R_PWM, OUTPUT); pinMode(PIN_MOT_R_DIR, OUTPUT);
-#elif defined(DRIVER_L298N)
-  pinMode(PIN_MOT_L_EN, OUTPUT); pinMode(PIN_MOT_L_IN1, OUTPUT); pinMode(PIN_MOT_L_IN2, OUTPUT);
-  pinMode(PIN_MOT_R_EN, OUTPUT); pinMode(PIN_MOT_R_IN1, OUTPUT); pinMode(PIN_MOT_R_IN2, OUTPUT);
-#elif defined(DRIVER_BTS7960)
-  pinMode(PIN_MOT_L_RPWM, OUTPUT); pinMode(PIN_MOT_L_LPWM, OUTPUT);
-  pinMode(PIN_MOT_R_RPWM, OUTPUT); pinMode(PIN_MOT_R_LPWM, OUTPUT);
-#endif
   hardStop();
+  pinMode(PIN_ACT_EXTEND, OUTPUT);
+  pinMode(PIN_ACT_RETRACT, OUTPUT);
+  actuatorStop();
 
   pinMode(PIN_ENC_L_A, INPUT_PULLUP);
   pinMode(PIN_ENC_L_B, INPUT_PULLUP);
@@ -538,6 +642,7 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(PIN_ENC_R_A), isrEncR, CHANGE);
 
   pinMode(PIN_ESTOP, INPUT_PULLUP);
+  pinMode(PIN_DOCK, INPUT_PULLUP);
   pinMode(PIN_BUMPER_L, INPUT_PULLUP);
   pinMode(PIN_BUMPER_R, INPUT_PULLUP);
 #if defined(IR_DIGITAL)
@@ -550,7 +655,10 @@ void setup() {
   matrix.begin();
 #endif
 
-  Serial.begin(115200);       // USB CDC to the Pi (does not wait for the host)
+  Serial.begin(115200);       // USB (via the ESP32-S3 bridge) to the Pi
+#if RC_ENABLED
+  Serial1.begin(115200);      // i-BUS from the FS-iA6B on D0
+#endif
   lastSpeedMs = lastStatMs = millis();
   lastRampUs = micros();
   sendFrame("BOOT," FW_VERSION);
@@ -558,8 +666,11 @@ void setup() {
 
 void loop() {
   pollSerial();           // commands from the Pi
-  updateSafetyInputs();   // E-stop, bumpers, watchdog (highest priority)
+  pollIbus();             // RC receiver
+  updateSafetyInputs();   // E-stop, bumpers, watchdog, dock (highest priority)
+  updateManual();         // RC override (operator in control)
   updateRamp();           // motor outputs
+  updateActuator();
   updateSpeeds();
 
   uint32_t now = millis();

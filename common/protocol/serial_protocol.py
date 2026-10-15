@@ -28,6 +28,9 @@ Pi -> Arduino (commands)
 ``CLR``                    clear latched faults (only succeeds if the cause is gone)
 ``RST``                    zero both encoder counters
 ``CFG,<ramp>,<stat_ms>``   ramp rate in PWM/s (1..5000), STAT period (20..1000 ms)
+``ACT,<dir>,<ms>``         return-bin linear actuator: dir 1 extend / -1 retract / 0 stop,
+                           run time 0..15000 ms (relays are interlocked; refused while a
+                           fault is latched or manual RC mode is active) -> ``ACK,ACT``
 ``PING``                   Arduino answers ``PONG,<fw>``
 =========================  ==================================================
 
@@ -47,7 +50,11 @@ Safety rules implemented by the Arduino
   ``WATCHDOG`` latches (needs ``CLR``).
 * Hardware E-stop input active -> motors stop immediately, fault bit ``ESTOP``
   latches; ``CLR`` only works once the E-stop is released.
-* Bumper switch pressed -> same as E-stop with fault bit ``BUMPER``.
+* Bumper switch pressed (optional input) -> same as E-stop with fault bit ``BUMPER``.
+* Flysky FS-iA6B i-BUS: when the transmitter's manual switch (SwA, CH5) is on
+  and frames are fresh (< 100 ms) the Arduino drives the motors from the
+  sticks (manual commissioning). ``CMD`` frames are ignored meanwhile and the
+  Pi sees ``rc = 2`` in ``STAT`` and inhibits autonomous motion.
 """
 
 from __future__ import annotations
@@ -56,7 +63,7 @@ from dataclasses import dataclass
 from enum import IntEnum, IntFlag
 
 BAUD = 115200
-MAX_LINE = 96
+MAX_LINE = 128
 PWM_MAX = 255
 WATCHDOG_MS = 500
 FIRMWARE_PROTOCOL_VERSION = 1
@@ -73,6 +80,7 @@ class ErrCode(IntEnum):
     UNKNOWN_COMMAND = 2
     BAD_ARGS = 3
     LINE_TOO_LONG = 4
+    REJECTED = 5            # valid command refused in the current state (e.g. ACT during a fault)
 
 
 class FaultFlags(IntFlag):
@@ -184,6 +192,12 @@ def make_ping() -> bytes:
     return encode_frame("PING")
 
 
+def make_actuator(direction: int, duration_ms: int) -> bytes:
+    """``ACT,<dir>,<ms>`` - dir 1 extend, -1 retract, 0 stop; duration clamped to 0..15000 ms."""
+    d = 1 if direction > 0 else (-1 if direction < 0 else 0)
+    return encode_frame("ACT", d, max(0, min(15000, int(duration_ms))))
+
+
 # ------------------------------------------------------- Arduino -> Pi reports
 STAT_FIELDS: tuple[str, ...] = (
     "millis",      # Arduino uptime, ms (wraps at 2^32)
@@ -200,6 +214,9 @@ STAT_FIELDS: tuple[str, ...] = (
     "pwm_right",
     "vbat_mv",     # battery voltage in mV (0 if not wired)
     "hb_seq",      # last heartbeat sequence received
+    "dock",        # 1 = Hall-effect home-dock sensor active (AGV in charging/waiting position)
+    "rc",          # Flysky i-BUS: 0 no signal, 1 signal present (auto), 2 manual override active
+    "act",         # return-bin actuator: 1 extending, -1 retracting, 0 idle
 )
 
 
@@ -221,6 +238,14 @@ class StatusReport:
     pwm_right: int
     vbat_mv: int
     hb_seq: int
+    dock: bool = False
+    rc: int = 0
+    act: int = 0
+
+    @property
+    def manual(self) -> bool:
+        """True while the Flysky manual override drives the motors."""
+        return self.rc == 2
 
     @classmethod
     def from_frame(cls, frame: Frame) -> "StatusReport":
@@ -233,6 +258,7 @@ class StatusReport:
             millis=v[0], enc_left=v[1], enc_right=v[2], speed_left=v[3], speed_right=v[4],
             ir1=v[5], ir2=v[6], bumper=v[7], estop=bool(v[8]), fault=FaultFlags(v[9] & 0x7),
             pwm_left=v[10], pwm_right=v[11], vbat_mv=v[12], hb_seq=v[13],
+            dock=bool(v[14]), rc=v[15], act=v[16],
         )
 
     def to_frame(self) -> bytes:
@@ -241,6 +267,7 @@ class StatusReport:
             "STAT", self.millis, self.enc_left, self.enc_right, self.speed_left, self.speed_right,
             self.ir1, self.ir2, self.bumper, int(self.estop), int(self.fault),
             self.pwm_left, self.pwm_right, self.vbat_mv, self.hb_seq,
+            int(self.dock), self.rc, self.act,
         )
 
 
