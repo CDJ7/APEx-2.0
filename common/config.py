@@ -108,6 +108,15 @@ class Config:
             return "127.0.0.1"
         return str(self.get(f"network.{device}.bind", "0.0.0.0"))
 
+    def port(self, dotted: str) -> int:
+        """Port at ``dotted``; in simulation ``<dotted>_sim`` wins if present
+        (e.g. Modbus 502 needs admin rights on a laptop, so sim uses 5020)."""
+        if self.simulation:
+            sim = self.get(dotted + "_sim")
+            if sim is not None:
+                return int(sim)
+        return int(self.require(dotted))
+
     # ------------------------------------------------------------------ paths
     def path_of(self, dotted: str) -> Path:
         """Resolve a path value relative to the repository root."""

@@ -33,7 +33,7 @@ class SettingsPage(Page):
             g.addWidget(section(h), 0, c)
         rows = [
             ("Main station (this PC)", cfg.get("network.station.host"),
-             f"REST {cfg.get('network.station.rest_port')} · Modbus {cfg.get('network.station.plc_modbus_port')} · "
+             f"REST {cfg.get('network.station.rest_port')} · Modbus {cfg.port('network.station.plc_modbus_port')} · "
              f"PLC-JSON {cfg.get('network.station.plc_tcp_port')}"),
             ("Workstation laptop", cfg.get("network.workstation.host"), "REST client"),
             ("PLC", cfg.get("network.plc.host"), f"Modbus client (unit {cfg.get('plc.modbus_unit_id')})"),

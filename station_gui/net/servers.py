@@ -36,7 +36,7 @@ class StationServers:
         self.plc_json: PlcJsonServer | None = None
         if self.protocol in ("modbus_tcp", "both"):
             self.modbus = ModbusTcpServer(self.bank, cfg.bind_address("station"),
-                                          int(cfg.require("network.station.plc_modbus_port")),
+                                          cfg.port("network.station.plc_modbus_port"),
                                           int(cfg.get("plc.modbus_unit_id", 1)),
                                           set(cfg.get("security.plc_allowed_ips", []) or []))
             self.bridge = PlcBridge(core, self.bank, cfg, lambda: self.modbus.last_ip if self.modbus else "?")

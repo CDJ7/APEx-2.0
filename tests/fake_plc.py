@@ -151,7 +151,7 @@ def main() -> None:
             print(plc.call(name))
         return
 
-    plc = ModbusPlc(host, int(cfg.require("network.station.plc_modbus_port")), int(cfg.get("plc.modbus_unit_id", 1)))
+    plc = ModbusPlc(host, cfg.port("network.station.plc_modbus_port"), int(cfg.get("plc.modbus_unit_id", 1)))
     plc.beat()
     if args.action == "status":
         print(json.dumps(plc.status(), indent=2))
