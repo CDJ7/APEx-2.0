@@ -1,0 +1,209 @@
+# =============================================================================
+# APEX Systems AGV — single source of configuration for every component.
+#
+#   * Every IP address, port, serial device, robot dimension and tuning value
+#     lives here. Code must NEVER hard-code any of these.
+#   * Values marked  # VERIFY  are placeholders that must be measured /
+#     confirmed on the real hardware.
+#   * Secrets can be overridden with environment variables so they do not have
+#     to be committed:  APEX_API_KEY, APEX_AGV_TOKEN, APEX_PLC_TOKEN
+#   * Pass --sim to any entry point (or set APEX_SIM=1) to run without hardware.
+# =============================================================================
+
+system:
+  name: "APEX Systems AGV"
+  simulation: false            # default; overridden by --sim / APEX_SIM=1
+  log_dir: "logs"              # relative to the repo root unless absolute
+  log_level: "INFO"
+
+# -----------------------------------------------------------------------------
+# Network — all devices share one router with static IPs.
+# -----------------------------------------------------------------------------
+network:
+  # In simulation mode every "host" below is replaced by 127.0.0.1 so the whole
+  # system runs on one laptop.
+  sim_use_localhost: true
+
+  station:                     # Main station GUI / server PC
+    host: "192.168.1.10"
+    bind: "0.0.0.0"            # interface the station servers listen on
+    rest_port: 8000            # FastAPI REST API (workstation laptop)
+    plc_modbus_port: 5020      # Modbus TCP server for the PLC (502 needs root/admin;
+                               # set to 502 on Windows or via setcap on Linux)
+    plc_tcp_port: 5200         # TCP/JSON fallback server for the PLC
+
+  workstation:                 # Workstation laptop (REST client)
+    host: "192.168.1.20"
+
+  plc:                         # Allen-Bradley PLC (top-level system master)
+    host: "192.168.1.30"
+
+  agv:                         # Raspberry Pi 5 on the AGV
+    host: "192.168.1.40"
+    port: 5100                 # AGV command/telemetry server (NDJSON over TCP)
+    bind: "0.0.0.0"
+
+# -----------------------------------------------------------------------------
+# Security — shared secrets. CHANGE THESE before deploying.
+# -----------------------------------------------------------------------------
+security:
+  api_key: "apex-dev-api-key"        # REST API header  X-API-Key   (env APEX_API_KEY)
+  agv_token: "apex-dev-agv-token"    # station <-> AGV hello token  (env APEX_AGV_TOKEN)
+  plc_token: "apex-dev-plc-token"    # PLC TCP/JSON fallback token  (env APEX_PLC_TOKEN)
+  # Optional source-IP allow lists. Empty list = allow any IP on the LAN.
+  rest_allowed_ips: []
+  plc_allowed_ips: []                # e.g. ["192.168.1.30"]
+  agv_allowed_ips: []                # e.g. ["192.168.1.10"]
+
+# -----------------------------------------------------------------------------
+# PLC interface (station side)
+# -----------------------------------------------------------------------------
+plc:
+  model: "Allen-Bradley (MS2-H1SO as specified)"   # VERIFY exact catalog number
+  # modbus_tcp : station is a Modbus TCP *server*; the PLC is the Modbus client
+  #              (it polls status and writes commands). See docs/PLC_INTEGRATION.md
+  # tcp_json   : newline-delimited JSON socket (for PLCs/HMIs without Modbus)
+  # both       : run both servers
+  protocol: "modbus_tcp"
+  modbus_unit_id: 1
+  heartbeat_timeout_s: 5.0     # PLC considered offline if its heartbeat register stalls
+
+# -----------------------------------------------------------------------------
+# Main station
+# -----------------------------------------------------------------------------
+station:
+  db_path: "station_gui/data/apex_station.db"
+  auto_approve: true           # orders go Pending -> Approved immediately on submit
+  auto_dispatch: true          # approved orders are sent to the AGV as soon as it is free
+  home_station: "MAIN"         # route-graph station name where parts are loaded
+  agv_reconnect_s: 2.0
+  telemetry_stale_s: 3.0       # AGV shown as "disconnected" after this long without telemetry
+  default_requester: "operator"
+
+# -----------------------------------------------------------------------------
+# AGV (Raspberry Pi 5 + Arduino Uno R4 WiFi)
+# -----------------------------------------------------------------------------
+agv:
+  map_yaml: "agv_pi/maps/sim_warehouse.yaml"       # saved occupancy grid (ROS map_server style)
+  routes_yaml: "agv_pi/maps/sim_warehouse_routes.yaml"
+  telemetry_hz: 5.0
+  control_hz: 20.0
+
+  arduino:
+    port: "/dev/arduino"       # udev symlink, see agv_pi/udev/99-apex-agv.rules
+    baud: 115200
+    heartbeat_ms: 100          # Pi -> Arduino heartbeat period
+    watchdog_ms: 500           # must match WATCHDOG_MS in the sketch
+    status_timeout_s: 0.5      # Pi faults if STAT frames stop arriving
+    reconnect_s: 2.0
+
+  robot:                       # VERIFY all of these on the real chassis
+    wheel_diameter_m: 0.100
+    wheel_base_m: 0.400        # distance between wheel contact patches
+    encoder_ticks_per_rev: 660 # ticks per WHEEL revolution as counted by the sketch (x2 decoding)
+    max_wheel_speed_mps: 0.60  # wheel speed at PWM 255 (used for feed-forward)
+    width_m: 0.50
+    length_m: 0.60
+    min_pwm: 40                # PWM below which the motors stall (dead band)
+
+  wheel_pid:                   # Pi-side closed-loop wheel speed control
+    kp: 120.0
+    ki: 250.0
+    i_limit: 80.0
+
+  lidar:
+    port: "/dev/rplidar"
+    baud: 115200
+    clockwise: true            # RPLIDAR reports angles clockwise (seen from above)
+    angle_offset_deg: 0.0      # lidar 0 deg relative to robot forward, CCW positive  # VERIFY
+    mount_x_m: 0.10            # lidar position in robot frame  # VERIFY
+    mount_y_m: 0.0
+    min_range_m: 0.15
+    max_range_m: 8.0
+    min_quality: 5
+    motor_pwm: 660             # only used by A2/A3; A1 motor is DTR controlled
+    reconnect_s: 2.0
+
+  mapping:
+    resolution_m: 0.05
+    size_m: 40.0               # square map extent built during mapping
+    icp_max_iterations: 30
+    icp_max_correspondence_m: 0.5
+    keyframe_dist_m: 0.20
+    keyframe_angle_deg: 10.0
+
+  localization:
+    icp_max_iterations: 20
+    icp_max_correspondence_m: 0.4
+    min_inlier_ratio: 0.35     # below this the scan match is rejected (odometry only)
+    max_correction_m: 0.5      # reject jumps larger than this per update
+
+  navigation:
+    max_speed_mps: 0.35
+    slow_speed_mps: 0.15       # used inside the "slow" safety zone
+    max_turn_rate_rps: 1.2
+    lookahead_m: 0.45          # pure-pursuit lookahead
+    goal_tolerance_m: 0.15
+    heading_turn_in_place_deg: 50.0
+    obstacle_corridor_margin_m: 0.10   # added to half the robot width
+    obstacle_lookahead_m: 1.2          # how far ahead the path corridor is checked
+    map_obstacle_tolerance_m: 0.15     # scan points this close to a mapped wall are ignored
+    permanent_obstacle_timeout_s: 10.0 # blocked this long by a static obstacle -> reroute
+    moving_obstacle_threshold_m: 0.10  # cluster centroid movement that counts as "moving"
+    blocked_segment_expiry_s: 0        # 0 = blocked segments stay blocked until cleared
+    arrived_dwell_s: 0                 # 0 = wait at destination for 'release'; >0 auto-return
+    grid_inflation_m: 0.25
+
+  safety:
+    stop_distance_m: 0.35      # any sensor: obstacle closer than this -> immediate stop
+    slow_distance_m: 0.80      # lidar/camera: obstacle closer than this -> slow speed
+    lidar_front_half_angle_deg: 35.0
+    lidar_stale_s: 0.6
+    camera_stale_s: 1.0
+    camera_required: false     # if true, camera loss is a fault; otherwise a warning
+
+  ir:
+    # arduino  : sensors wired to the Arduino (REQUIRED for analog Sharp sensors —
+    #            the Pi 5 has no ADC). Values arrive in the STAT frame.
+    # pi_gpio  : digital IR modules wired to Pi GPIO via gpiozero + lgpio
+    source: "arduino"
+    type: "sharp_gp2y0a21"     # sharp_gp2y0a21 (analog, 10-80 cm) | digital (active-low modules)
+    count: 2                   # VERIFY number fitted
+    names: ["front_left", "front_right"]
+    stop_distance_cm: 25.0     # analog: closer than this -> stop
+    adc_bits: 10
+    adc_vref: 5.0
+    gpio_pins: [17, 27]        # BCM pins, only for source=pi_gpio
+
+  vision:
+    enabled: true
+    width: 640
+    height: 480
+    process_width: 320         # frames are downscaled for processing
+    fps: 30
+    roi:                       # trapezoid in normalized image coords (0..1), the floor ahead
+      top_y: 0.45
+      bottom_y: 1.0
+      top_half_width: 0.18
+      bottom_half_width: 0.48
+    zone_near_y: 0.80          # blob bottom edge below this (normalized) -> near
+    zone_mid_y: 0.62           # below this -> mid, else far
+    min_blob_area: 0.004       # fraction of ROI area
+    person_detection: false    # MobileNet-SSD via OpenCV DNN (see docs/PI_SETUP.md)
+    person_model_dir: "agv_pi/models"
+    person_every_n_frames: 5
+    person_confidence: 0.5
+
+  battery:
+    full_mv: 12600             # 3S Li-ion example  # VERIFY
+    empty_mv: 10500
+
+# -----------------------------------------------------------------------------
+# Simulation (laptop demo without hardware)
+# -----------------------------------------------------------------------------
+simulation:
+  world_png: "agv_pi/maps/sim_warehouse.png"
+  start_station: "MAIN"
+  speed_factor: 1.0
+  lidar_noise_m: 0.01
+  odom_noise: 0.02             # fractional wheel-slip noise

@@ -1,0 +1,4 @@
+# Everything needed to run the full simulation + tests on a laptop.
+-r station_gui/requirements.txt
+-r agv_pi/requirements-sim.txt
+pytest>=8.0
