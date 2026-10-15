@@ -79,6 +79,7 @@ station:
   agv_reconnect_s: 2.0
   telemetry_stale_s: 3.0       # AGV shown as "disconnected" after this long without telemetry
   default_requester: "operator"
+  seed_demo_data: false        # fill an empty database with demo parts (always on in --sim)
 
 # -----------------------------------------------------------------------------
 # AGV (Raspberry Pi 5 + Arduino Uno R4 WiFi)

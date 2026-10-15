@@ -27,6 +27,9 @@ arduino-cli upload  --fqbn arduino:renesas_uno:unor4wifi -p /dev/arduino agv_ard
 
 ## Bench test (Serial Monitor, 115200, "Newline")
 
+> The E-stop input is fail-safe: **if no E-stop button is wired, jumper A3 to
+> GND**, otherwise `estop` stays 1 and every motor command is ignored.
+
 | Type | Expect |
 |---|---|
 | *(reset)* | `BOOT,1.0.0*0B` then `STAT,...` every 50 ms |

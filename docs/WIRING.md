@@ -49,7 +49,7 @@ of `agv_arduino/agv_arduino.ino`. If you change a pin there, update this table.
 | **A0** | analog in | Front-left IR (Sharp GP2Y0A21 Vo) | or digital module OUT |
 | **A1** | analog in | Front-right IR | |
 | **A2** | analog in | Battery divider midpoint | 30 kΩ top / 10 kΩ bottom → 12.6 V ≈ 3.15 V |
-| **A3** | in | E-stop **NC** contact #2 → GND | `INPUT_PULLUP`: open/broken wire = STOP (fail-safe) |
+| **A3** | in | E-stop **NC** contact #2 → GND | `INPUT_PULLUP`: open/broken wire = STOP (fail-safe). **Bench testing without a button: jumper A3 to GND**, otherwise the AGV stays in E-stop |
 | **A4** | in | Left bumper **NO** switch → GND | `INPUT_PULLUP`: LOW = pressed |
 | **A5** | in | Right bumper **NO** switch → GND | |
 | 5V / GND | power | IR sensors, encoder Vcc (if 5 V encoders) | |
