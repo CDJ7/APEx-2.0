@@ -206,6 +206,7 @@ apex-agv/
 │   ├── PLC_INTEGRATION.md      CompactLogix (Modbus TCP Client AOI) setup, loading interlock
 │   ├── code_vs_report_gaps.md  midterm report ↔ code reconciliation (G-01…G-33)
 │   ├── project_facts.md        facts extracted from the midterm report
+│   ├── APEX_Midterm_Report_v2.docx / .pdf   updated midterm report (+ report_v2_changes.md)
 │   ├── BRINGUP.md              calibration + "verify on real hardware" checklist
 │   └── img/                    GUI screenshots
 └── tests/                  ← simulators, fake clients, unit + integration tests
