@@ -41,8 +41,10 @@ real AGV. Work through them in order, wheels off the ground until §4.
       charge / wait position, within the dock tolerance **[TBD: dock position tolerance]**. Returning
       AGV reaches DOCKING → IDLE with `docked: true`; with the magnet removed it
       raises `dock_failed` after `agv.dock.max_approach_s`.
-- [ ] **Return-bin actuator**: `ACT,1,<ms>` extends, `ACT,-1,<ms>` retracts, never
-      both relays at once; time the full stroke and set `agv.actuator.extend_ms` /
+- [ ] **Return-bin actuator (VEVOR OK648, 12 V)**: confirm the 24→12 V converter
+      output is 12 V **before** connecting the actuator. `ACT,1,<ms>` extends,
+      `ACT,-1,<ms>` retracts, never both relays at once; time the full stroke
+      (catalog ≈ 13.5 s) and set `agv.actuator.extend_ms` /
       `retract_ms`. *Empty return bin* in the GUI tips and retracts while docked.
       E-stop during a stroke stops the actuator.
 - [ ] **Flysky FS-i6 / FS-iA6B**: receiver bound, i-BUS on D0; SwA (CH5) on →

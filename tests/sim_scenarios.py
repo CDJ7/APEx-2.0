@@ -168,7 +168,9 @@ def discharge(s: Scenario) -> bool:
         return False
     ok = bool(s.cmd(MsgType.DISCHARGE, {}).get("ok"))
     ok &= wait_for(lambda: s.tel.get("actuator") == 1, 3)
-    ok &= wait_for(lambda: any(e["kind"] == "discharge_done" for e in s.events), 30, 0.2)
+    ok &= wait_for(lambda: any(e["kind"] == "discharge_done" for e in s.events), 45, 0.2)
+    # 25 % duty cycle: an immediate second discharge must be refused
+    ok &= not s.cmd(MsgType.DISCHARGE, {}).get("ok")
     return ok
 
 

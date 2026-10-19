@@ -104,7 +104,12 @@ class AgvController:
         self.dock_max_s = float(dc.get("max_approach_s", 15.0))
         self.relocalize_on_dock = bool(dc.get("relocalize_on_dock", True))
         ac = cfg.section("agv.actuator")
-        self.act_times = (int(ac.get("extend_ms", 6000)), int(ac.get("hold_ms", 2000)), int(ac.get("retract_ms", 6500)))
+        self.act_times = (int(ac.get("extend_ms", 14500)), int(ac.get("hold_ms", 2000)),
+                          int(ac.get("retract_ms", 14500)))
+        duty = min(1.0, max(0.05, float(ac.get("duty_cycle", 0.25))))
+        on_s = (self.act_times[0] + self.act_times[2]) / 1000.0
+        self.act_rest_s = on_s * (1.0 / duty - 1.0)          # 25 % duty: 29 s on -> 87 s rest
+        self._act_ready_at = 0.0
         sc = cfg.section("agv.safety")
         self.link_timeout_s = float(sc.get("station_link_timeout_s", 3.0))
         self.link_auto_resume = bool(sc.get("station_link_auto_resume", True))
@@ -237,8 +242,10 @@ class AgvController:
         if self._discharge:
             return
         self._require_home_ready("discharge")
-        ext, hold, ret = self.act_times
         now = time.monotonic()
+        if now < self._act_ready_at:
+            raise CommandError(f"actuator resting for its duty cycle - ready in {self._act_ready_at - now:.0f} s")
+        ext, hold, ret = self.act_times
         self._discharge = [(now, 1, ext), (now + (ext + hold) / 1000.0, -1, ret),
                            (now + (ext + hold + ret) / 1000.0, 0, 0)]
 
@@ -761,10 +768,12 @@ class AgvController:
             if self.sw_estop or self.manual or self.sm.state not in (S.IDLE, S.LOADING):
                 self.arduino.actuate(0, 0)
                 self._discharge.clear()
+                self._act_ready_at = now + self.act_rest_s          # partial stroke still counts for duty
                 self._emit(EventKind.DISCHARGE_DONE, "return-bin discharge interrupted", ok=False)
                 return
             if direction == 0 and ms == 0:
-                self._emit(EventKind.DISCHARGE_DONE, "return bin discharged", ok=True)
+                self._act_ready_at = now + self.act_rest_s
+                self._emit(EventKind.DISCHARGE_DONE, "defective part pushed into the inspection bin", ok=True)
             else:
                 self.arduino.actuate(direction, ms)
 

@@ -29,7 +29,7 @@ guess them in hardware: measure, then update `config.yaml` and this file.
        │                                                         │  └─► Pi 5 (USB-C 5 V) │
        ├─[F2]──► Cytron MDD20A VB+  ──► M1 (left), M2 (right)     │      └─► USB: Arduino, │
        │                                                         │          RPLIDAR       │
-       └─[F3]──[D2 if the actuator is 12 V]──[fwd/rev relay]──► linear actuator          │
+       └─[F3]──[D2 24→12 V DC/DC]──[fwd/rev relay]──► VEVOR OK648 12 V actuator          │
                                                                                          │
   [F5]──[E-stop NC contact #1]──[manual reset]──[hardwired safety control]──► K1 coil A1/A2
                                                     (coil suppression diode / RC required)
@@ -141,15 +141,27 @@ A push-pull 3.3/5 V output also works on D11 (the pull-up is then irrelevant).
 
 ## 6. Return-bin linear actuator
 
-Forward/reverse relay pair on D5/D6 drives the actuator (supply F3 → D2 if it
-is a 12 V actuator → relays). `DISCHARGE` (station) → `ACT,1,<extend_ms>`,
-hold, `ACT,-1,<retract_ms>`; timings in `agv.actuator` are **[TBD]** until
-the actuator stroke is timed. The Pi only sends `ACT` while the AGV is docked
+Selected actuator: **VEVOR OK648**, 12 V DC, 203.2 mm (8 in) stroke, 15 mm/s,
+1,000 N max thrust, 5 A listed current, **25 % duty cycle** (catalog values).
+It pushes a defective part from the AGV's return tray into the guarded
+inspection bin at the home dock.
+
+* **12 V only — never connect it to the 24 V battery.** Supply: F3 → **D2, a
+  fused 24→12 V DC/DC converter** (> 5 A continuous with start-up/stall
+  headroom **[TBD: converter model and fuse rating]**) → forward/reverse relay
+  pair on D5/D6 → actuator.
+* Stroke time 203.2 / 15 ≈ 13.5 s each way. `DISCHARGE` (station) →
+  `ACT,1,14500`, hold 2 s, `ACT,-1,14500` (`agv.actuator`, includes a margin to
+  reach the internal end stop **[VERIFY: measured stroke time]**).
+* Duty cycle: after a discharge (~29 s on) the Pi refuses the next one for
+  ~87 s (`agv.actuator.duty_cycle: 0.25`).
+
+The Pi only sends `ACT` while the AGV is docked
 and stationary; the firmware rejects it during E-stop, a fault or manual RC
 mode, switches one relay off before the other can be energised (break before
 make), stops the actuator on E-stop/watchdog/`STOP`, and limits one run to
-15 s.
-**[TBD: actuator model and voltage (report: "VEVOR, could be 12 V").]**
+15 s. End-of-travel / bin-presence sensing is not fitted yet
+**[TBD: actuator limit and bin-presence sensors]**.
 
 ## 7. Flysky FS-i6 + FS-iA6B (manual commissioning)
 
@@ -195,7 +207,7 @@ and reserve these addresses by DHCP reservation]**.
 | CompactLogix PLC | 192.168.1.30 | Ethernet | station Modbus server :502 (PLC is the client) |
 | AGV Raspberry Pi 5 | 192.168.1.40 | Wi-Fi 5 GHz | station connects to :5100 |
 | Flexbase QR phone | 192.168.1.50 [TBD] | Wi-Fi | station REST `/api/scan` :8000 |
-| KUKA arm controller | [TBD] | per lab | PLC only (not the station) |
+| KUKA arm controller (arm mounted in the FLEXBASE) | [TBD] | per lab | PLC only (not the station) |
 
 None of these links is a safety function: losing Wi-Fi makes the AGV hold
 still (`safety.station_link_timeout_s`), but emergency stopping is the

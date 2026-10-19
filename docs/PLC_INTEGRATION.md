@@ -33,7 +33,7 @@ object is the fallback (§5).
 |---|---|---|
 | CompactLogix controller | 192.168.1.30 / 255.255.255.0 **[TBD: lab subnet]** | — (client) |
 | Main station PC | 192.168.1.10 | Modbus TCP **502** |
-| KUKA arm controller | **[TBD]** | PLC ↔ arm only (not the station) |
+| KUKA arm (mounted in the FLEXBASE) controller | **[TBD]** | PLC ↔ arm only (not the station) |
 
 All on the NETGEAR N600 DGND3700v2 router (wired LAN ports for the station
 and PLC). Restrict access with `security.plc_allowed_ips: ["192.168.1.30"]`.

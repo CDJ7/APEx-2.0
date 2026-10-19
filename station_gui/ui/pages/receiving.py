@@ -178,6 +178,14 @@ class ReceiveTab(QWidget):
             msg += f"<br><br><b>{bad}</b> damaged/missing item(s) will be added to the discrepancy report."
         if not confirm(self, "Confirm receipt", msg, danger=bool(bad)):
             return
+        # second, physical confirmation (midterm report §2.3: double-confirmation at the workstation)
+        returns = sum(ln["damaged"] for ln in lines)
+        q2 = "Has the part been removed from APEx?"
+        if returns:
+            q2 = (f"Has the part been removed from APEx, and have the <b>{returns}</b> defective unit(s) "
+                  "been added to APEx's return tray?")
+        if not confirm(self, "Confirm physical exchange", q2, danger=False):
+            return
         try:
             self.ctx.core.receive_order(self.order["id"], lines, self.notes.text(),
                                         actor=self.receiver.text() or self.ctx.operator)

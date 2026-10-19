@@ -158,7 +158,7 @@ reference it as `ack.ref`) · `ts` UNIX time · `src` sender name · `data` payl
 | `load` | `order_id` | IDLE and **docked** | enter LOADING: the KUKA arm loads the bins, motion inhibited |
 | `load_abort` | — | LOADING | back to IDLE |
 | `dispatch` | `order_id` (int), `destination` (station name), `items` (opt.: `part_number`, `qty`, `bin`) | IDLE or LOADING (same order), **docked**, no blocking fault, localised | plan route, start delivery leg; ack carries `route`, `length_m` |
-| `discharge` | — | IDLE/LOADING, docked, stationary | tip the return bin: `ACT` extend, hold, retract (`agv.actuator`) → `discharge_done` |
+| `discharge` | — | IDLE/LOADING, docked, stationary, actuator rested (25 % duty) | push the defective part into the inspection bin: `ACT` extend, hold, retract (`agv.actuator`, ≈ 31 s) → `discharge_done` |
 | `cancel` | `order_id` (opt.) | task active | abort delivery, return home |
 | `release` | — | ARRIVED | leave the workstation, return home |
 | `return_home` | — | not FAULT/E_STOP | abort any task, go home |

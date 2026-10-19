@@ -20,7 +20,7 @@ from agv_pi.sim.world import SimWorld
 from common.protocol import serial_protocol as sp
 
 FW_VERSION = "sim-2.0.0"
-ACT_SPEED = 0.25                     # simulated actuator stroke fraction per second
+ACT_SPEED = 15.0 / 203.2             # VEVOR OK648: 15 mm/s over a 203.2 mm stroke (fraction per second)
 TICK_S = 0.005                       # 200 Hz firmware loop
 
 

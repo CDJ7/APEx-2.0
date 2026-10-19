@@ -1,8 +1,9 @@
 # APEX Systems — Automated Guided Vehicle (AGV)
 
 Software for a senior-design AGV that delivers parts from a **home (main)
-station**, where a KUKA arm loads its six bins, to workstations — and brings
-damaged parts back in its return bin. It contains four programs that talk
+station**, where a KUKA arm mounted in the FLEXBASE loads its six bins, to
+workstations — and brings damaged parts back, which a 12 V linear actuator
+pushes into an inspection bin at the home dock. It contains four programs that talk
 over one local router (NETGEAR N600 DGND3700v2):
 
 | # | Component | Runs on | Folder |
@@ -26,8 +27,8 @@ system can be demoed and tested without hardware.
 flowchart LR
     subgraph LAN["NETGEAR N600 DGND3700v2 router · static IPs (config.yaml)"]
         PLC["PLC (CompactLogix 1769)<br/>192.168.1.30<br/><b>system master</b>"]
-        KUKA["KUKA arm<br/>(loads the AGV bins)"]
-        PHONE["Phone in flexbase<br/>QR scanner app"]
+        KUKA["KUKA arm in the FLEXBASE<br/>(loads the AGV bins)"]
+        PHONE["Phone at the FLEXBASE<br/>QR scanner app"]
         LAP["Workstation laptop<br/>192.168.1.20"]
         subgraph ST["Main station PC · 192.168.1.10"]
             GUI["PySide6 HMI GUI"]

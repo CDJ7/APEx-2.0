@@ -198,10 +198,16 @@ agv:
     relocalize_on_dock: true   # reset the pose to the home node when the Hall sensor triggers
 
   actuator:
-    # Return-bin linear actuator (VEVOR, model TBD) on the forward/reverse relay pair.
-    extend_ms: 6000            # [TBD: measured full stroke time]
-    hold_ms: 2000              # wait with the bin tipped
-    retract_ms: 6500
+    # Return-bin linear actuator: VEVOR OK648, 12 V DC, 203.2 mm (8 in) stroke,
+    # 15 mm/s, 1,000 N max, 5 A, 25 % duty cycle (catalog values, midterm report
+    # ref. [20]). Powered from a fused 24->12 V DC/DC converter through the
+    # forward/reverse relay pair - NEVER directly from the 24 V battery.
+    # Full stroke = 203.2 mm / 15 mm/s = 13.5 s; run times include a margin so the
+    # actuator reaches its internal end stop [VERIFY: measured stroke time].
+    extend_ms: 14500
+    hold_ms: 2000              # wait with the part pushed into the inspection bin
+    retract_ms: 14500          # firmware caps one run at 15 s (ACT_MAX_MS)
+    duty_cycle: 0.25           # rest >= on_time * (1/duty - 1) before the next discharge
 
   safety:
     stop_distance_m: 0.35      # any sensor: obstacle closer than this -> immediate stop
