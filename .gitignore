@@ -1,0 +1,25 @@
+# Reference repositories (cloned per docs/README "third_party"), never committed
+third_party/
+
+# Manufacturer manuals: copyrighted, kept locally only (see docs/manuals/README.md)
+docs/manuals/*
+!docs/manuals/README.md
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# ROS 2 colcon build products
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+
+# Runtime data
+*.db
+*.db-wal
+*.db-shm
+logs/
