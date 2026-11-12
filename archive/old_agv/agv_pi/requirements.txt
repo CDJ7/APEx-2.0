@@ -1,0 +1,10 @@
+# Raspberry Pi 5 (Raspberry Pi OS Bookworm 64-bit).
+# Install the heavy / hardware packages with apt FIRST (see docs/PI_SETUP.md):
+#   sudo apt install python3-picamera2 python3-opencv python3-numpy python3-scipy \
+#                    python3-lgpio python3-gpiozero
+# and create the venv with --system-site-packages so those are visible.
+pyserial>=3.5
+PyYAML>=6.0
+# Already provided by apt on the Pi (listed for completeness / laptop installs):
+numpy>=1.24
+scipy>=1.10
