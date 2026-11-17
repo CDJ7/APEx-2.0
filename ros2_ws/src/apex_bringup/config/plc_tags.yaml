@@ -1,0 +1,72 @@
+# APEx 2.0 - non-safety PLC handshake tags (Compact GuardLogix 5380, STANDARD task only).
+#
+# Shared by apex_plc_bridge (real PLC via pycomm3) and apex_cell_sim (simulated PLC),
+# so the simulator uses exactly the same names. The PLC side is two controller-scoped
+# tags of user-defined types, created in Studio 5000:
+#
+#   APEX_FromStation  (UDT APEX_FromStation_T)  - written by the station PC (ONLY these members)
+#   APEX_ToStation    (UDT APEX_ToStation_T)    - written by the PLC, read by the station PC
+#
+# SAFETY: nothing in this file is a safety tag. Safety-task tags, safety I/O and KUKA
+# Ethernet-safety bits (NHE, BS, QBS, SHS1, SHS2, US2, SBH, ...) are NEVER written by the
+# station. apex_plc_bridge enforces a write allow-list in code (prefix APEX_FromStation.
+# plus a deny list) on top of this file. Status tags marked read_only are display only.
+#
+# Types: BOOL, DINT, INT, STRING; arrays as TYPE[n].
+
+write_prefix: "APEX_FromStation."
+max_lines: 10                       # length of the part arrays          [TBD: parts per order]
+
+from_station:                       # station PC -> PLC (allow-listed writes)
+  Station_Heartbeat:   {type: DINT, doc: "increments every 500 ms; PLC faults if stale"}
+  Job_ID:              {type: DINT, doc: "job being requested / worked"}
+  Job_Request:         {type: BOOL, doc: "rising edge: new job with the part arrays below"}
+  Job_LineCount:       {type: DINT, doc: "number of valid entries in the arrays"}
+  Job_PartCodes:       {type: "DINT[10]", doc: "part code per line -> KRL pick program / shelf slot"}
+  Job_PartQty:         {type: "DINT[10]", doc: "quantity per line"}
+  AGV_AtTransfer:      {type: BOOL, doc: "TurtleBot reports it is parked under the chute"}
+  Load_Request:        {type: BOOL, doc: "start picking + transferring the job's parts"}
+  Return_Request:      {type: BOOL, doc: "TurtleBot at the return-unload pose (deferred feature)"}
+  Job_Cancel:          {type: BOOL, doc: "operator cancelled the job (PLC decides how to stop)"}
+  Fault_Reset_Request: {type: BOOL, doc: "operator pressed Reset in the GUI (PLC decides)"}
+  Job_Fault_Station:   {type: BOOL, doc: "station-side fault: PLC holds conveyor/transfer"}
+
+to_station:                         # PLC -> station PC (read only)
+  PLC_Heartbeat:            {type: DINT}
+  Cell_Mode:                {type: DINT, doc: "0 OFF, 1 MANUAL, 2 AUTO, 3 FAULT"}
+  Job_Ack:                  {type: DINT, doc: "echoes Job_ID once accepted"}
+  Cell_ReadyForAGV:         {type: BOOL, doc: "transfer station clear and ready"}
+  AGV_InPosition_Confirmed: {type: BOOL, doc: "PLC sensor confirms robot/bin under the chute"}
+  Conveyor_Run:             {type: BOOL}
+  StopStation_Release:      {type: BOOL}
+  Pusher_Extend:            {type: BOOL, doc: "transfer_mode A only"}
+  Chute_PartCount:          {type: DINT, doc: "parts counted by the photoeye for this job"}
+  Parts_Placed:             {type: DINT, doc: "parts the KUKA placed on the conveyor for this job"}
+  Transfer_Complete:        {type: BOOL, doc: "pulses after each counted part"}
+  Transfer_Fault:           {type: BOOL}
+  Load_Complete:            {type: BOOL}
+  Job_Fault:                {type: BOOL}
+  Fault_Code:               {type: DINT, doc: "see fault_codes below"}
+  Transfer_Mode:            {type: DINT, doc: "1 A, 2 B, 3 C"}
+  KUKA_Mode:                {type: DINT, doc: "1 T1, 2 T2, 3 AUT, 4 AUT EXT (from KR C4 outputs)", read_only: true}
+  KUKA_Ready:               {type: BOOL, read_only: true}
+  KUKA_Busy:                {type: BOOL, read_only: true}
+  KUKA_Fault:               {type: BOOL, read_only: true}
+  KUKA_ProgramNo:           {type: DINT, read_only: true}
+  Safety_OK:                {type: BOOL, doc: "summary of the safety task, DISPLAY ONLY", read_only: true}
+  Safety_Simulated:         {type: BOOL, doc: "1 = this is apex_cell_sim, not a real safety system", read_only: true}
+  StackLight_Red:           {type: BOOL, read_only: true}
+  StackLight_Amber:         {type: BOOL, read_only: true}
+  StackLight_Green:         {type: BOOL, read_only: true}
+
+fault_codes:
+  0: NONE
+  1: STATION_HEARTBEAT_LOST
+  2: PICK_FAILED
+  3: CONVEYOR_TIMEOUT
+  4: TRANSFER_TIMEOUT
+  5: COUNT_MISMATCH
+  6: AGV_NOT_IN_POSITION
+  7: KUKA_NOT_READY
+  8: CELL_NOT_AUTO
+  9: STATION_FAULT

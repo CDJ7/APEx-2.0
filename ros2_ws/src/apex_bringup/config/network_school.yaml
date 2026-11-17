@@ -1,0 +1,20 @@
+# Network profile: SCHOOL network (campus Wi-Fi / classroom LAN).
+#
+# Used for simulation and for TurtleBot-only work in shared spaces. The PLC and the KR C4
+# are NEVER on the school network: with this profile apex_plc_bridge refuses the real
+# PLC backend and only talks to apex_cell_sim on this computer.
+profile: school
+plc:
+  allowed: false              # hard rule - do not change in this file; use network_lab.yaml
+  backend: sim                # sim = apex_cell_sim (127.0.0.1)
+  sim_host: 127.0.0.1
+  sim_port: 44818
+kuka:
+  allowed: false              # the station never talks to the KR C4 directly on any network anyway
+turtlebot:
+  ros_domain_id: 0            # set ROS_DOMAIN_ID to this before launching
+  rmw_implementation: rmw_fastrtps_cpp
+  discovery_server: ""        # "" = simple discovery; campus Wi-Fi often blocks multicast -> use the lab router
+notes: >
+  Campus networks usually block multicast and client-to-client traffic, so a real TurtleBot 4
+  may not be reachable here at all. Simulation works anywhere.
