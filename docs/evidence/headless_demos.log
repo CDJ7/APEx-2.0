@@ -1,0 +1,133 @@
+
+========== demo: full ==========
+[    0.1 s] job_queued           job 1   position=1
+[    0.1 s] job_started          job 1   units=3
+[    0.1 s] step                 job 1   IDLE -> WAIT_PLC_ACK
+[    0.7 s] plc_ack              job 1   
+[    0.8 s] step                 job 1   WAIT_PLC_ACK -> UNDOCKING
+[   10.9 s] step                 job 1   UNDOCKING -> NAV_TO_TRANSFER
+[   10.9 s] route                job 1   target=transfer_staging, direction=counter-clockwise, length_m=1.56
+[   16.1 s] arrived              job 1   target=transfer_staging
+[   16.2 s] step                 job 1   NAV_TO_TRANSFER -> FINAL_APPROACH
+[   24.2 s] step                 job 1   FINAL_APPROACH -> WAIT_IN_POSITION
+[   25.3 s] loading_started      job 1   units=3
+[   25.3 s] step                 job 1   WAIT_IN_POSITION -> LOADING
+[   37.1 s] part_counted         job 1   counted=1, expected=3
+[   48.6 s] part_counted         job 1   counted=2, expected=3
+[   60.2 s] part_counted         job 1   counted=3, expected=3
+[   60.2 s] load_complete        job 1   counted=3
+[   60.2 s] step                 job 1   LOADING -> NAV_TO_STATION
+[   60.2 s] route                job 1   target=station_a, direction=counter-clockwise, length_m=4.87
+[   76.0 s] arrived              job 1   target=station_a
+[   76.0 s] step                 job 1   NAV_TO_STATION -> AWAIT_RECEIPT
+[   76.0 s] receipt_confirmed    job 1   lines=[{'ok': 2, 'damaged': 0, 'missing': 0}, {'ok': 1, 'damaged': 0, 'missing': 0}]
+[   76.0 s] job_done             job 1   outcome=delivered
+[   76.0 s] step                         AWAIT_RECEIPT -> NAV_TO_DOCK
+[   76.0 s] route                        target=dock, direction=clockwise, length_m=6.05
+[   95.7 s] arrived                      target=dock
+[   95.7 s] step                         NAV_TO_DOCK -> DOCKING
+[  105.7 s] docked                       
+[  105.7 s] step                         DOCKING -> IDLE
+========== full: PASS (robot drove 12.5 m, battery 93 %) ==========
+
+========== demo: reroute ==========
+[    0.2 s] job_queued           job 2   position=1
+[    0.2 s] job_started          job 2   units=1
+[    0.2 s] step                 job 2   IDLE -> WAIT_PLC_ACK
+[    0.9 s] plc_ack              job 2   
+[    0.9 s] step                 job 2   WAIT_PLC_ACK -> UNDOCKING
+[   10.9 s] step                 job 2   UNDOCKING -> NAV_TO_TRANSFER
+[   10.9 s] route                job 2   target=transfer_staging, direction=counter-clockwise, length_m=1.56
+[   16.1 s] arrived              job 2   target=transfer_staging
+[   16.1 s] step                 job 2   NAV_TO_TRANSFER -> FINAL_APPROACH
+[   24.2 s] step                 job 2   FINAL_APPROACH -> WAIT_IN_POSITION
+[   25.3 s] loading_started      job 2   units=1
+[   25.3 s] step                 job 2   WAIT_IN_POSITION -> LOADING
+[   37.1 s] part_counted         job 2   counted=1, expected=1
+[   37.1 s] load_complete        job 2   counted=1
+[   37.1 s] step                 job 2   LOADING -> NAV_TO_STATION
+[   37.1 s] route                job 2   target=station_a, direction=counter-clockwise, length_m=4.87
+[   66.6 s] direction_blocked    job 2   target=station_a, direction=counter-clockwise, reason=blocked, at=(1.34, 1.57)
+[   66.6 s] rerouting            job 2   target=station_a, direction=clockwise
+[   66.6 s] route                job 2   target=station_a, direction=clockwise, length_m=13.94
+[  111.7 s] arrived              job 2   target=station_a
+[  111.7 s] step                 job 2   NAV_TO_STATION -> AWAIT_RECEIPT
+[  111.7 s] receipt_confirmed    job 2   lines=[{'ok': 1, 'damaged': 0, 'missing': 0}]
+[  111.7 s] job_done             job 2   outcome=delivered
+[  111.7 s] step                         AWAIT_RECEIPT -> NAV_TO_DOCK
+[  111.7 s] route                        target=dock, direction=counter-clockwise, length_m=10.75
+[  146.6 s] arrived                      target=dock
+[  146.6 s] step                         NAV_TO_DOCK -> DOCKING
+[  156.8 s] docked                       
+[  156.8 s] step                         DOCKING -> IDLE
+========== reroute: PASS (robot drove 29.2 m, battery 91 %) ==========
+
+========== demo: return ==========
+[    0.0 s] job_queued           job 3   position=1
+[    0.1 s] job_started          job 3   units=3
+[    0.1 s] step                 job 3   IDLE -> WAIT_PLC_ACK
+[    0.7 s] plc_ack              job 3   
+[    0.7 s] step                 job 3   WAIT_PLC_ACK -> UNDOCKING
+[   10.9 s] step                 job 3   UNDOCKING -> NAV_TO_TRANSFER
+[   10.9 s] route                job 3   target=transfer_staging, direction=counter-clockwise, length_m=1.56
+[   16.1 s] arrived              job 3   target=transfer_staging
+[   16.1 s] step                 job 3   NAV_TO_TRANSFER -> FINAL_APPROACH
+[   24.1 s] step                 job 3   FINAL_APPROACH -> WAIT_IN_POSITION
+[   25.2 s] loading_started      job 3   units=3
+[   25.2 s] step                 job 3   WAIT_IN_POSITION -> LOADING
+[   36.9 s] part_counted         job 3   counted=1, expected=3
+[   48.6 s] part_counted         job 3   counted=2, expected=3
+[   60.2 s] part_counted         job 3   counted=3, expected=3
+[   60.2 s] load_complete        job 3   counted=3
+[   60.2 s] step                 job 3   LOADING -> NAV_TO_STATION
+[   60.2 s] route                job 3   target=station_b, direction=clockwise, length_m=4.87
+[   76.0 s] arrived              job 3   target=station_b
+[   76.0 s] step                 job 3   NAV_TO_STATION -> AWAIT_RECEIPT
+[   76.0 s] receipt_confirmed    job 3   lines=[{'ok': 2, 'damaged': 1, 'missing': 0}]
+[   76.0 s] step                 job 3   AWAIT_RECEIPT -> NAV_TO_RETURN
+[   76.0 s] route                job 3   target=return_drop, direction=counter-clockwise, length_m=5.62
+[   94.1 s] arrived              job 3   target=return_drop
+[   94.1 s] step                 job 3   NAV_TO_RETURN -> AWAIT_RETURN_CONFIRM
+[   94.1 s] return_confirmed     job 3   count=1, expected=1, discrepancy=0
+[   94.1 s] job_done             job 3   outcome=delivered_with_return
+[   94.1 s] step                         AWAIT_RETURN_CONFIRM -> NAV_TO_DOCK
+[   94.1 s] route                        target=dock, direction=clockwise, length_m=2.91
+[  103.7 s] arrived                      target=dock
+[  103.7 s] step                         NAV_TO_DOCK -> DOCKING
+[  113.9 s] docked                       
+[  113.9 s] step                         DOCKING -> IDLE
+========== return: PASS (robot drove 15.0 m, battery 93 %) ==========
+
+========== demo: shortfall ==========
+[    0.0 s] job_queued           job 4   position=1
+[    0.1 s] job_started          job 4   units=3
+[    0.1 s] step                 job 4   IDLE -> WAIT_PLC_ACK
+[    0.7 s] plc_ack              job 4   
+[    0.7 s] step                 job 4   WAIT_PLC_ACK -> UNDOCKING
+[   10.7 s] step                 job 4   UNDOCKING -> NAV_TO_TRANSFER
+[   10.7 s] route                job 4   target=transfer_staging, direction=counter-clockwise, length_m=1.56
+[   15.9 s] arrived              job 4   target=transfer_staging
+[   15.9 s] step                 job 4   NAV_TO_TRANSFER -> FINAL_APPROACH
+[   24.0 s] step                 job 4   FINAL_APPROACH -> WAIT_IN_POSITION
+[   25.1 s] loading_started      job 4   units=3
+[   25.1 s] step                 job 4   WAIT_IN_POSITION -> LOADING
+[   36.8 s] part_counted         job 4   counted=1, expected=3
+WARNING:apex.cell_sim:cell fault COUNT_MISMATCH (job 4)
+[   60.0 s] load_shortfall       job 4   counted=2, expected=3, not_loaded=[0, 1]
+[   60.0 s] step                 job 4   LOADING -> LOAD_SHORTFALL
+[   60.0 s] shortfall_accepted   job 4   not_loaded=[0, 1]
+[   60.0 s] step                 job 4   LOAD_SHORTFALL -> NAV_TO_STATION
+[   60.0 s] route                job 4   target=station_b, direction=clockwise, length_m=4.87
+[   75.8 s] arrived              job 4   target=station_b
+[   75.8 s] step                 job 4   NAV_TO_STATION -> AWAIT_RECEIPT
+[   75.8 s] receipt_confirmed    job 4   lines=[{'ok': 2, 'damaged': 0, 'missing': 0}, {'ok': 0, 'damaged': 0, 'missing': 0}]
+[   75.8 s] job_done             job 4   outcome=delivered
+[   75.8 s] step                         AWAIT_RECEIPT -> NAV_TO_DOCK
+[   75.8 s] route                        target=dock, direction=counter-clockwise, length_m=3.65
+[   87.7 s] arrived                      target=dock
+[   87.7 s] step                         NAV_TO_DOCK -> DOCKING
+[   97.7 s] docked                       
+[   97.7 s] step                         DOCKING -> IDLE
+========== shortfall: PASS (robot drove 10.1 m, battery 93 %) ==========
+
+RESULTS: full=PASS  reroute=PASS  return=PASS  shortfall=PASS

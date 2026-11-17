@@ -1,0 +1,30 @@
+# Job state machine timeouts and policy (docs/JOB_STATE_MACHINE.md).
+# Seconds unless noted. Values are starting points - tune during commissioning and
+# record the measured values in docs/OPEN_QUESTIONS.md.
+timeouts:
+  plc_ack: 10.0               # Job_Request -> Job_Ack
+  undock: 30.0
+  nav_leg: 180.0              # one route leg (any destination); exceeded = treat direction as blocked
+  final_approach: 45.0        # staging pose -> parked under the chute
+  final_approach_retries: 3
+  in_position: 15.0           # AGV_AtTransfer -> AGV_InPosition_Confirmed
+  load_base: 60.0             # loading timeout = load_base + load_per_part * parts
+  load_per_part: 30.0
+  receipt_remind: 300.0
+  receipt_max: 1800.0         # robot waits this long at the station, then faults (parts stay on board)
+  return_remind: 300.0
+  dock: 120.0
+  dock_retries: 2
+  heartbeat: 2.0              # PLC heartbeat stale -> PLC_LINK_LOST
+policy:
+  battery_min_start_pct: 40.0 # [TBD] measure real consumption per trip
+  battery_dock_pct: 30.0
+  # Damaged-part handling is deferred (team decision). The software keeps the simple
+  # "drive to return_drop, operator confirms" path so the receipt data is complete; the
+  # physical return mechanism is designed in a later stage.
+  return_trip_enabled: true
+  station_heartbeat_s: 0.5
+  pulse_hold_s: 0.5
+router:
+  blocked_ttl_s: 120.0        # forget a corridor blockage after this long
+  block_clearance: 0.35
