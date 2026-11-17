@@ -73,6 +73,16 @@ moves to the *Answered* table at the bottom.
 | Q-X3 | "Not loaded" vs "lost in transfer": if the PLC placed a part on the conveyor but the photoeye did not count it, treat it as a discrepancy for an operator to check (not restocked)? | Yes (`JOB_STATE_MACHINE.md` §5). |
 | Q-X4 | Old requirements are void. Is there **any** number from the old midterm (budget, speed, size) that should still apply? | None carried over. |
 
+## Station HMI (Q-H)
+
+| ID | Question | Working assumption |
+|---|---|---|
+| Q-H1 | Where does the worker confirm receipt at a delivery station: the station PC GUI, the workstation laptop (REST), or a tablet at each station? | Workstation laptop via REST; the main GUI as a fallback. |
+| Q-H2 | Maximum parts per trip (bin size, 9 kg payload) - sets `station.max_units_per_order`. | 20 (placeholder). |
+| Q-H3 | Real names of the delivery stations (shown to users) and their part numbers / PLC part codes for the parts stored in the FlexBase. | "Station A" / "Station B"; demo parts with codes 10-30. |
+| Q-H4 | Is the station PC a touch screen? (Button sizes, on-screen keyboard.) | Mouse + keyboard. |
+| Q-H5 | Should orders need an approval step (`station.auto_approve: false`), e.g. by the lab manager? | Auto-approve. |
+
 ## Ignition HMI (Q-I)
 
 | ID | Question | Working assumption |

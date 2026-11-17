@@ -13,7 +13,7 @@ There are three ways to run it, from lightest to complete:
 | **3. Gazebo + Nav2** | Ubuntu 24.04, ROS 2 Jazzy, Gazebo Harmonic, TurtleBot 4 simulator | the full stack with the simulated TurtleBot 4 driving our lab | the real demos (a), (b), (c) |
 
 > **Status at the Simulation Bring-up checkpoint:** levels 1 and 2 were run and pass
-> (53 tests; all four headless demos PASS, log in [`evidence/headless_demos.log`](evidence/headless_demos.log)).
+> (all tests; all four headless demos PASS, log in [`evidence/headless_demos.log`](evidence/headless_demos.log)).
 > The generated Gazebo worlds were checked with Gazebo Harmonic (`gz sdf -k`: valid; 500
 > headless iterations without errors). **Level 3 has not been run yet**: the build
 > environment could not install ROS 2 (its package server was blocked). It needs to be run once
@@ -28,7 +28,7 @@ git clone https://github.com/CDJ7/apex-2.0.git
 cd apex-2.0
 python3 -m pip install pyyaml pytest          # Ubuntu 24.04: sudo apt install python3-yaml python3-pytest
 
-python3 -m pytest ros2_ws -q                  # level 1: ~53 tests, a few seconds
+python3 -m pytest ros2_ws -q                  # level 1: ~54 tests, a few seconds
 
 cd ros2_ws                                     # level 2
 PYTHONPATH=$(ls -d src/apex_* | tr '\n' ':') python3 -m apex_orchestrator.demo all
@@ -139,7 +139,19 @@ ros2 launch apex_bringup demo.launch.py scenario:=full gazebo:=false
 Uses the kinematic robot inside the orchestrator instead of Nav2 - useful on a laptop that
 cannot run Gazebo, or to debug services and topics.
 
-### 2.5 Operate by hand
+### 2.5 With the station HMI
+
+```bash
+ros2 launch apex_bringup sim.launch.py              # terminal 1
+ros2 launch apex_bringup apex.launch.py             # terminal 2
+cd ~/apex-2.0/station && python3 -m apex_station.app --link ros    # terminal 3
+```
+
+Order parts on the *Orders* page, watch the robot on *Robot & Cell*, confirm the receipt on
+*Receiving*. The station HMI also runs **without ROS** (`python -m apex_station.app`, built-in
+simulation) - see [`station/README.md`](../station/README.md).
+
+### 2.6 Operate by hand
 
 ```bash
 ros2 launch apex_bringup sim.launch.py              # terminal 1

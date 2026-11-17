@@ -88,8 +88,11 @@ PLC, and the PLC decides.**
 
 ### 3.1 Station GUI (PySide6) and StationCore
 
-Carried over from the old design (see [`AUDIT.md`](AUDIT.md)) and extended in
-the **Station HMI Upgrade** stage.
+Carried over from the old design (see [`AUDIT.md`](AUDIT.md)) and rebuilt in
+the **Station HMI Upgrade** stage: [`station/README.md`](../station/README.md).
+StationCore talks to the orchestrator through a `JobLink` - the ROS 2 client
+(`--link ros`) or a built-in simulation that runs the real job machine and
+cell simulator in-process, so the HMI works on any computer.
 
 **Split of screens (team decision):** **Ignition** is the HMI for the FlexBase
 cell (§3.1a). The station GUI is the HMI for **orders, inventory and the
