@@ -1,0 +1,34 @@
+# Changes on top of turtlebot4_navigation/config/nav2.yaml (deep-merged at launch by
+# apex_bringup.nav2_params). Keep this file SHORT: only what the APEx lab needs.
+# Every value here is a starting point for sim; re-tune on the real robot (docs/SIMULATION.md).
+
+controller_server:
+  ros__parameters:
+    general_goal_checker:
+      # Parking under the chute needs better than the 0.25 m default. 6 cm / ~6 deg keeps the
+      # bin under a 0.20 m wide chute exit. If the real robot cannot hold this with AMCL alone,
+      # the precise approach moves to opennav_docking + a fiducial (docs/OPEN_QUESTIONS.md).
+      xy_goal_tolerance: 0.06
+      yaw_goal_tolerance: 0.10
+    progress_checker:
+      # A robot that has not moved 0.3 m in 15 s is stuck -> Nav2 aborts -> the orchestrator
+      # marks the corridor blocked and reroutes the other way round the FlexBase.
+      required_movement_radius: 0.3
+      movement_time_allowance: 15.0
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      inflation_layer:
+        inflation_radius: 0.35      # 1.52 m corridors; 0.45 leaves too little room beside the chute
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      inflation_layer:
+        inflation_radius: 0.35
+
+planner_server:
+  ros__parameters:
+    GridBased:
+      tolerance: 0.10               # do not accept a goal 0.5 m away from the requested pose
+      allow_unknown: false

@@ -1,0 +1,7 @@
+# Operator commands: stop | reset | resume | cancel (cancel uses job_id).
+string action
+string operator_name
+uint32 job_id
+---
+bool ok
+string message

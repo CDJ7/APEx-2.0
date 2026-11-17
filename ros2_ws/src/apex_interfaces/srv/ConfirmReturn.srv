@@ -1,0 +1,5 @@
+uint32 job_id
+uint32 count                # damaged parts the operator took out of the return bin
+---
+bool ok
+string message

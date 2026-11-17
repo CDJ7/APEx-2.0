@@ -1,0 +1,5 @@
+uint32 job_id
+apex_interfaces/LineReceipt[] lines   # one per order line, same order
+---
+bool ok
+string message

@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>apex_cell_sim</name>
+  <version>0.1.0</version>
+  <description>APEx 2.0 simulated FlexBase cell (PLC handshake, KUKA, conveyor, gravity chute) with the real tag names and timing.</description>
+  <maintainer email="apex@example.com">APEx Systems team</maintainer>
+  <license>MIT</license>
+  <exec_depend>apex_plc_bridge</exec_depend>
+  <exec_depend>apex_bringup</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <test_depend>python3-pytest</test_depend>
+  <export><build_type>ament_python</build_type></export>
+</package>

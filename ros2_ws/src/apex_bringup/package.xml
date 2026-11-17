@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>apex_bringup</name>
+  <version>0.1.0</version>
+  <description>APEx 2.0 lab model, generated Gazebo worlds and Nav2 maps, configuration and launch files.</description>
+  <maintainer email="apex@example.com">APEx Systems team</maintainer>
+  <license>MIT</license>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>ros_gz_sim</exec_depend>
+  <exec_depend>turtlebot4_gz_bringup</exec_depend>
+  <exec_depend>turtlebot4_navigation</exec_depend>
+  <exec_depend>nav2_map_server</exec_depend>
+  <exec_depend>nav2_lifecycle_manager</exec_depend>
+  <!-- launch files also start apex_cell_sim / apex_plc_bridge / apex_orchestrator nodes; those
+       packages depend on this one (lab model, configs), so they are not listed here (no cycle). -->
+  <test_depend>python3-pytest</test_depend>
+  <export><build_type>ament_python</build_type></export>
+</package>

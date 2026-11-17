@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>apex_plc_bridge</name>
+  <version>0.1.0</version>
+  <description>APEx 2.0 PLC bridge: the only connection to the FlexBase Compact GuardLogix (allow-listed standard-task tags, never safety).</description>
+  <maintainer email="apex@example.com">APEx Systems team</maintainer>
+  <license>MIT</license>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>apex_interfaces</exec_depend>
+  <exec_depend>apex_bringup</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <test_depend>python3-pytest</test_depend>
+  <export><build_type>ament_python</build_type></export>
+</package>

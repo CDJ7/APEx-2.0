@@ -1,0 +1,6 @@
+# Write one station->PLC handshake member. apex_plc_bridge refuses anything not on its allow-list.
+string name                 # member name, e.g. Job_Request
+string value_json           # JSON value: true, 7, [1,2,3]
+---
+bool ok
+string message

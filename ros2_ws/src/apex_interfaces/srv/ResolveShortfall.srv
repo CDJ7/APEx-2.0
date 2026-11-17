@@ -1,0 +1,5 @@
+uint32 job_id
+string action               # send | cancel
+---
+bool ok
+string message
