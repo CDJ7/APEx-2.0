@@ -1,0 +1,83 @@
+# APEx 2.0 lab model - the single source of truth for the lab geometry.
+#
+# Generated from this file (never edit the outputs by hand):
+#   worlds/apex_lab*.sdf          Gazebo world(s)
+#   maps/apex_lab.{pgm,yaml}      Nav2 occupancy map (until the real SLAM map exists)
+#   maps/apex_lab_keepout.{pgm,yaml}  Nav2 keepout mask (FlexBase island)
+#   docs/img/lab_layout.png       layout figure
+# Regenerate:  python3 ros2_ws/src/apex_bringup/apex_bringup/generate_lab.py
+#
+# Frame: map / world. Origin = centre of the FlexBase footprint, +x along its
+# 72" length toward the conveyor exit, +y left, metres, yaw in degrees.
+# Values marked TBD are proposals (docs/OPEN_QUESTIONS.md) - measure the real lab.
+
+world_name: apex_lab
+
+flexbase:                    # Automation NTH FlexBase 6 ft model (confirmed)
+  width: 1.829               # 72 in, along x
+  depth: 1.016               # 40 in, along y
+  height: 2.286              # 7'6" maximum (brochure)
+
+island:                      # TurtleBot keep-out area around the cell (Nav2 keepout zone)
+  clearance: 0.30            # service / door clearance on every side      [TBD: door swing]
+  x_extension: 0.95          # extra length on +x for conveyor run-out + transfer station
+
+corridor_width: 1.524        # 5 ft loop corridor all round the island
+
+walls:
+  height: 1.0
+  thickness: 0.10
+
+conveyor:                    # Quickdraw conveyor run-out from the FlexBase (+x end)  [TBD: real exit side/height]
+  x_start: 0.414
+  x_end: 1.764
+  width: 0.18
+  top_height: 0.85           # [TBD: measured conveyor height at exit]
+
+transfer_station:            # stop station + chute support stand, outside the guarding
+  x_min: 1.464
+  x_max: 1.864
+  y_min: -0.25
+  y_max: 0.25
+  height: 0.85
+  mode: B                    # A pusher+chute | B gravity chute (CHOSEN) | C lift-and-locate+tilt tray
+
+chute:                       # gravity chute from conveyor end down into the delivery bin
+  x_top: 1.864
+  z_top: 0.85
+  x_exit: 2.14               # exit is above the transfer pose (robot body clears the transfer station by ~9 cm)
+  z_exit: 0.55               # [TBD] must clear TurtleBot top (0.351 m) + bin height
+  width: 0.20
+
+stations:                    # physical delivery-station tables against the outer walls
+  table_size: [1.0, 0.30, 0.75]   # x, y, height
+
+robot:                       # TurtleBot 4 standard (user manual)
+  radius: 0.171              # 342 x 339 mm footprint
+  height: 0.351
+  max_payload_kg: 9.0
+  max_speed: 0.31            # safe mode
+
+poses:                       # name: [x, y, yaw_deg]
+  transfer:          [2.14,  0.00,  90]     # bin under the chute exit
+  transfer_staging:  [2.14, -0.60,  90]     # Nav2 hands over to the precise final approach here
+  return_drop:       [2.14,  0.75,  90]     # operator empties the return bin (damaged parts - deferred)
+  dock:              [3.10, -1.20,   0]     # charging dock on the east outer wall [TBD: outlet]
+  station_a:         [0.00,  1.75, 180]     # delivery station A (north)
+  station_b:         [0.00, -1.75,   0]     # delivery station B (south)
+
+loop:                        # corridor centre-line corners, counter-clockwise order
+  corners:
+    NE: [ 2.63,  1.57]
+    NW: [-1.98,  1.57]
+    SW: [-1.98, -1.57]
+    SE: [ 2.63, -1.57]
+
+obstacles:                   # available obstacle models; worlds/scenarios choose which are present
+  box_small:      {center: [-1.30,  1.57], size: [0.40, 0.40, 0.40]}   # Nav2 drives round it
+  barrier_north:  {center: [ 1.40,  1.57], size: [0.30, 1.52, 0.60]}   # blocks the north corridor
+  barrier_south:  {center: [ 0.90, -1.57], size: [0.30, 1.52, 0.60]}   # blocks the south corridor
+
+map:
+  resolution: 0.05           # m/pixel, same as the TurtleBot 4 SLAM default
+  margin: 0.30               # free border around the outer walls

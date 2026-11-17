@@ -1,0 +1,8 @@
+# Python packages for the APEx 2.0 workspace that do not come from ROS 2 apt packages.
+# ROS 2 Jazzy, Nav2, TurtleBot 4 and Gazebo Harmonic: see docs/SIMULATION.md.
+#
+#   python3 -m pip install -r ros2_ws/requirements.txt
+#   (Ubuntu 24.04 system Python: add --break-system-packages, or use a venv with --system-site-packages)
+PyYAML>=6.0          # configs (also python3-yaml from apt)
+pycomm3>=1.2         # EtherNet/IP to the Compact GuardLogix 5380 (lab profile only)
+pytest>=7.0          # tests (also python3-pytest from apt)
