@@ -138,6 +138,7 @@ class Policy:
     return_trip_enabled: bool = True      # damaged-part return (mechanism still to be designed)
     station_heartbeat_s: float = 0.5
     pulse_hold_s: float = 0.5             # minimum on-time of request bits (many PLC scans)
+    idle_dock_s: float = 5.0              # idle and off the dock this long -> return to the dock
 
 
 # ------------------------------------------------------------------ machine
@@ -284,6 +285,9 @@ class JobMachine:
             "expected": j.units if j else 0, "counted": j.counted if j else 0,
             "queue": [q.job_id for q in self.queue], "fault_code": self.fault_code, "fault_text": self.fault_text,
             "route": self._routes[0].direction.value if self._routes else "",
+            "route_xy": [list(p) for p in self._routes[0].waypoints] if self._routes else [],
+            "blocked_xy": [list(p) for p in self.router.blocked_points(self._now)],
+            "not_loaded": list(j.not_loaded) if j else [],
         }
 
     # ------------------------------------------------------------ main loop
@@ -323,7 +327,9 @@ class JobMachine:
             self.job = self.queue.popleft()
             self.job.not_loaded = [0] * len(self.job.lines)
             self._request_job()
-        elif not self.nav.is_docked() and self.nav.battery_pct() < self.policy.battery_dock_pct:
+        elif not self.nav.is_docked() and (self.nav.battery_pct() < self.policy.battery_dock_pct
+                                           or self._elapsed() > self.policy.idle_dock_s):
+            # nothing to do and not on the dock (e.g. after a cancel or a resume): go and charge
             self._navigate("dock", Step.DOCKING, Step.NAV_TO_DOCK)
 
     def _on_wait_plc_ack(self) -> None:

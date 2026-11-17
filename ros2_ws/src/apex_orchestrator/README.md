@@ -35,6 +35,8 @@ NAV_TO_DOCK → DOCKING → IDLE`, with `LOAD_SHORTFALL`, `FAULT` and `RESUME_WA
   waits. **Reset** clears the fault; motion restarts only on **Resume**, at a step chosen to be
   safe (e.g. a pickup that did not finish starts again from the PLC request).
 * PLC heartbeat stale > 2 s → `PLC_LINK_LOST`. The station heartbeat goes to the PLC every 0.5 s.
+* Idle and not on the dock for `idle_dock_s` (5 s) - e.g. after a cancel at the transfer station
+  or a resume - the robot drives back to the dock.
 
 ## Rerouting
 

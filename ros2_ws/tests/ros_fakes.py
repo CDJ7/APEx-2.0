@@ -12,6 +12,7 @@ synchronously and the test drives timers by hand.
 from __future__ import annotations
 
 import sys
+import time
 import types
 from pathlib import Path
 from typing import Any, Callable
@@ -219,7 +220,7 @@ def install() -> Bus:
     rclpy.init = lambda args=None: None
     rclpy.shutdown = lambda: None
     rclpy.ok = lambda: True
-    rclpy.spin_once = lambda node, timeout_sec=0.0: None
+    rclpy.spin_once = lambda node, timeout_sec=0.0: time.sleep(min(timeout_sec or 0.0, 0.05))   # blocks like rclpy
     rclpy.spin_until_future_complete = lambda node, fut, timeout_sec=0.0: None
     node_mod = types.ModuleType("rclpy.node")
     node_mod.Node = Node

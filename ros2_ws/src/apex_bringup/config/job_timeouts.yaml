@@ -25,6 +25,7 @@ policy:
   return_trip_enabled: true
   station_heartbeat_s: 0.5
   pulse_hold_s: 0.5
+  idle_dock_s: 5.0            # idle off the dock (after a cancel / resume) -> back to the dock
 router:
   blocked_ttl_s: 120.0        # forget a corridor blockage after this long
   block_clearance: 0.35

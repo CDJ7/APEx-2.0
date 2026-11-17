@@ -153,6 +153,12 @@ class OrchestratorNode(Node):
         m.parts_counted = int(s["counted"])
         m.queue = [int(q) for q in s["queue"]]
         m.fault_code, m.fault_text = s["fault_code"], s["fault_text"]
+        x, y, yaw = self.nav.pose()
+        m.robot_x, m.robot_y, m.robot_yaw = float(x), float(y), float(yaw)
+        m.battery_pct = float(self.nav.battery_pct())
+        m.docked = bool(self.nav.is_docked())
+        m.route_xy = [float(v) for p in s["route_xy"] for v in p]
+        m.blocked_xy = [float(v) for p in s["blocked_xy"] for v in p]
         self.pub_status.publish(m)
 
     # ------------------------------------------------------------------ services

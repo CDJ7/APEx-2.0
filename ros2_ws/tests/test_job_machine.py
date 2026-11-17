@@ -179,3 +179,13 @@ def test_low_battery_job_waits():
     for _ in range(50):
         r.step()
     assert r.m.step is Step.IDLE and r.m.job is None and len(r.m.queue) == 1
+
+
+def test_idle_off_dock_returns_to_dock_after_cancel():
+    r = Rig(faults=FaultInjection(lost_part=2))
+    r.m.submit(order())
+    assert r.run_until(lambda m: m.step is Step.LOAD_SHORTFALL)
+    r.m.resolve_shortfall(1, "cancel")                       # robot is left under the chute
+    assert r.m.step is Step.IDLE and not r.nav.is_docked()
+    assert r.run_until(lambda m: m.step is Step.NAV_TO_DOCK, limit=r.now + 10)
+    assert r.run_until(done)
