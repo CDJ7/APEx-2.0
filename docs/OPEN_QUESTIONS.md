@@ -5,16 +5,18 @@ we assumed so work can continue, and **which stage is blocked** if the
 assumption turns out wrong. Answer in this file (or in chat) and the item
 moves to the *Answered* table at the bottom.
 
-## Blocking the Simulation Bring-up stage
+## Simulation Bring-up (Q-S)
 
 | ID | Question | Current assumption |
 |---|---|---|
 | Q-S1 | **ROS 2 distro on our TurtleBot 4.** Run `echo $ROS_DISTRO` or `cat /etc/os-release` on the robot's Raspberry Pi. | **Jazzy** (Ubuntu 24.04). All TurtleBot repos on the `jazzy` branch. |
 | Q-S2 | **Station PC.** Is it a dedicated Ubuntu 24.04 machine (or dual boot) that can run ROS 2 Jazzy + Gazebo? Studio 5000 and WorkVisual are Windows-only, so they would run on a separate Windows laptop. | Station PC = Ubuntu 24.04 + ROS 2 Jazzy; separate Windows laptop for Studio 5000 / WorkVisual. |
-| Q-S3 | **Simulation in the cloud session.** To build and run the Gazebo demos here, the session needs `packages.ros.org` and `packages.osrfoundation.org` allowed (currently blocked). OK to request that network change? | Otherwise code and world files are written here, and the demos are run on the team's Ubuntu machine. |
+| Q-S3 | **Who runs the Gazebo + Nav2 demos?** The build environment can install Gazebo Harmonic but not ROS 2 (its package server is blocked), so the worlds were validated in Gazebo and the logic headless; the full ROS run needs the team's Ubuntu 24.04 + Jazzy machine. Which machine, and who? | Station PC, following `docs/SIMULATION.md`. |
 | Q-S4 | **Parts to deliver:** how many part types, size and weight of each (heaviest?), how many parts per order, how they are stored in the cell (trays, fixtures, a parts rack?). Drives gripper choice, pick positions, conveyor pallet nests, bin size and the 9 kg payload budget. | Small parts ≤ 0.5 kg, ≤ 10 per order (placeholder). |
-| Q-S5 | **Transfer method** A / B / C (`docs/ARCHITECTURE.md` §3.6). | **A**: stop station + SMC pusher + padded chute (default). `transfer_mode` stays configurable. |
-| Q-S6 | **Pallet or directly on the belt?** Quickdraw is normally a pallet conveyor. Pallets give a repeatable part position for the pusher and the photoeye; bare belt is simpler but parts can roll or rotate. | **Proposal: pallets with a simple nest**, with the pusher pushing the part off the pallet into the chute. **[CONFIRM]** once parts are known. |
+| Q-S5 | ~~Transfer method~~ → answered A-7: **B, gravity chute**. Still open: real chute geometry (conveyor exit height, slope, exit height above the bin, padding). | Sim: top 0.85 m, exit 0.55 m, 0.28 m run, 0.20 m wide. |
+| Q-S6 | **Pallet or directly on the belt?** With the gravity chute the part has to leave the conveyor by itself at the end of the run, so it rides **directly on the belt** (or on a pallet that tips at the end). Does our Quickdraw run bare-belt? | **Proposal: bare belt**, stop station holds the part, releasing it lets it run off the end into the chute. **[CONFIRM]** |
+| Q-S7 | **Parking accuracy under the chute.** Is AMCL + Nav2 with a 6 cm goal tolerance good enough on the real floor, or do we add a fiducial (AprilTag on the transfer station, OAK-D) and opennav_docking for the last 0.6 m? | Try AMCL first; measure 20 parkings; fiducial if any is off by > 4 cm. |
+| Q-S8 | **Real cell timing** (pick, convey, release, drop per part) to replace the placeholders in `cell_sim.yaml`. | 6 s / 4 s / 0.5 s / 1 s. |
 
 ## Lab layout (Q-L)
 
@@ -67,9 +69,31 @@ moves to the *Answered* table at the bottom.
 | ID | Question | Current assumption |
 |---|---|---|
 | Q-X1 | Who owns the **risk assessment** and who signs off before AUT EXT runs with the TurtleBot (instructor, lab manager)? | Team as system integrator, reviewed by the instructor. |
-| Q-X2 | Damaged-part retrieval: the updated brief says an **operator** empties the return bin and confirms the count. Confirm there is **no** arm handling of the return bin in v1. | Operator only. |
+| Q-X2 | ~~Damaged-part retrieval~~ → deferred (A-9). | Operator-emptied return trip kept in software. |
 | Q-X3 | "Not loaded" vs "lost in transfer": if the PLC placed a part on the conveyor but the photoeye did not count it, treat it as a discrepancy for an operator to check (not restocked)? | Yes (`JOB_STATE_MACHINE.md` §5). |
 | Q-X4 | Old requirements are void. Is there **any** number from the old midterm (budget, speed, size) that should still apply? | None carried over. |
+
+## Ignition HMI (Q-I)
+
+| ID | Question | Working assumption |
+|---|---|---|
+| Q-I1 | Ignition **version and licence** (Maker / trial / full), and which computer runs the Ignition gateway (station PC, a separate PC, the Windows laptop)? | Gateway on the Windows laptop on the lab network. |
+| Q-I2 | Which request bits does **Ignition** own (e.g. cell start/stop, conveyor jog in MANUAL) and which does the **station** own (`APEX_FromStation`)? Each bit must have exactly one writer. | Station owns `APEX_FromStation`; Ignition owns a separate `APEX_FromHMI` UDT. |
+| Q-I3 | Should Ignition also show TurtleBot status (via a small REST/MQTT feed from the station), or is the robot only on the station GUI? | Robot only on the station GUI. |
+
+## Learning-Based Navigation (Q-R)
+
+| ID | Question | Working assumption |
+|---|---|---|
+| Q-R1 | What should the RL policy control: **local driving** (cmd_vel between waypoints, replacing MPPI), **route choice** (which way round the loop), or both? | Local driving only; routing stays rule-based. |
+| Q-R2 | Training hardware: is there a GPU machine (station PC or personal)? | Training on a team member's GPU laptop; CPU is possible but slow. |
+| Q-R3 | Success criterion to use the policy on the real robot? | Beats Nav2 MPPI in sim on success rate with zero collisions over 200 runs. |
+
+## Schedule (Q-C)
+
+| ID | Question | Working assumption |
+|---|---|---|
+| Q-C1 | **Spring break dates** (no work then). | `[TBD]` |
 
 ## Answered
 
@@ -81,3 +105,9 @@ moves to the *Answered* table at the bottom.
 | A-4 | Handoff via **conveyor + transfer station**; the TurtleBot stays outside the guarding at all times. | 2026-11-12 |
 | A-5 | The **C#** folder in Senior-Design is another project and is not part of APEx 2.0. | 2026-11-12 |
 | A-6 | apex-2.0 is a **fresh start**; Senior-Design is read-only reference. | 2026-11-12 |
+| A-7 | Transfer: **gravity chute** from the FlexBase onto the TurtleBot (`transfer_mode` B). | 2026-11-17 |
+| A-8 | **Ignition** is the HMI for the FlexBase. | 2026-11-17 |
+| A-9 | **Damaged-part handling is deferred** to a later stage. | 2026-11-17 |
+| A-10 | **RL navigation policy is approved** ("RL policy is a go") - new stage *Learning-Based Navigation*. | 2026-11-17 |
+| A-11 | The lab is modelled in the **Gazebo simulator** for the TurtleBot's benefit (map + training world). | 2026-11-17 |
+| A-12 | **No work during spring break.** | 2026-11-17 |

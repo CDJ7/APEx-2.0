@@ -88,7 +88,7 @@ stateDiagram-v2
 | P7 | `LOADING` | write `Load_Request` | `Load_Complete` | `T_load_total` = 60 s + `T_per_part` = 30 s × parts | `FAULT: LOAD_TIMEOUT` (or the PLC's `Transfer_Fault` / `Job_Fault` code) |
 | P7a | `PICK_PLACE` | (PLC) select KRL program for the part, start | part placed on the conveyor | (PLC) `T_pick` | PLC raises `Job_Fault` |
 | P7b | `CONVEYOR_INDEX` | (PLC) `Conveyor_Run` | part at stop station sensor | (PLC) `T_convey` | PLC raises `Transfer_Fault` |
-| P7c | `TRANSFER_RELEASE` | (PLC) `StopStation_Release` / `Pusher_Extend` (mode A) | photoeye pulse | (PLC) `T_drop` | PLC raises `Transfer_Fault` |
+| P7c | `TRANSFER_RELEASE` | (PLC) `StopStation_Release` (mode **B**, gravity chute - chosen) / `Pusher_Extend` (mode A) | photoeye pulse | (PLC) `T_drop` | PLC raises `Transfer_Fault` |
 | P8 | `LOAD_VERIFY` | compare `Chute_PartCount` with the ordered total | equal | — | **shortfall**: pause; GUI asks the operator to *retry missing parts*, *send with shortfall* (lines become **NOT LOADED**) or *cancel* |
 | D1 | `NAV_TO_STATION` | route to `station_a` / `station_b`, shorter clear direction | Nav2 succeeded | `T_nav_leg` | reroute once the other way (`REROUTE`); both blocked → `FAULT: NAV_BLOCKED` |
 | D2 | `AWAIT_RECEIPT` | GUI/REST prompt at the station | receipt confirmed: every line OK + damaged + missing = loaded qty | `T_receipt_remind` = 300 s (reminder, stack-light/GUI alert); `T_receipt_max` = 1800 s | after max: `FAULT: NO_RECEIPT` (robot stays parked, does not leave with parts) |
@@ -152,3 +152,23 @@ route(target):
 - Fault recovery: no automatic restart; Resume needs an operator.
 
 All collected in [`RISK_ASSESSMENT_POINTS.md`](RISK_ASSESSMENT_POINTS.md).
+
+## Implementation status (Simulation Bring-up)
+
+The machine is implemented in
+[`ros2_ws/src/apex_orchestrator/apex_orchestrator/job_machine.py`](../ros2_ws/src/apex_orchestrator/apex_orchestrator/job_machine.py)
+and tested in `ros2_ws/tests/test_job_machine.py`. Differences from the tables above:
+
+| Design | Implementation | Why |
+|---|---|---|
+| `QUEUED` state | `IDLE` with a non-empty queue | same behaviour, one state fewer |
+| `LOAD_VERIFY` (P8) | folded into `LOADING`: the PLC raises `COUNT_MISMATCH` (code 5) and the machine goes to `LOAD_SHORTFALL` | the PLC owns the count, the station mirrors it |
+| Shortfall choices *retry / send / cancel* | *send* and *cancel* only | *retry missing parts* needs a PLC "re-pick these lines" request; added with the PLC program (`PLC_INTEGRATION.md`) |
+| `FINISH` (F1) | `_finish_job` emits `job_done`; inventory booking is StationCore's job (Station HMI Upgrade) | one writer for the database |
+| Timeouts | all in `apex_bringup/config/job_timeouts.yaml` | tune without code changes |
+
+Damaged-part handling is **deferred** (team decision). The receipt still records
+OK / damaged / missing per line, and the simple return trip (R1, R2) stays in the
+software behind `policy.return_trip_enabled`, so demo (c) runs; the physical return
+mechanism is designed in a later stage.
+

@@ -30,7 +30,7 @@ zone and the robot's path never overlap.
 flowchart LR
     subgraph LAB["Lab network (own router) - see section 7"]
         subgraph SPC["Station PC - Ubuntu 24.04 + ROS 2 Jazzy  [CONFIRM OS]"]
-            GUI["Station GUI (PySide6)<br/>inventory · multi-part orders ·<br/>receiving OK/damaged/missing ·<br/>quarantine · job queue ·<br/>robot / cell / arm status"]
+            GUI["Station GUI (PySide6)<br/>inventory · multi-part orders ·<br/>receiving OK/damaged/missing ·<br/>quarantine · job queue ·<br/>robot status + cell summary"]
             CORE["StationCore<br/>SQLite inventory + orders +<br/>jobs + audit log"]
             REST["REST API :8000<br/>(workstation laptop)"]
             ORCH["apex_orchestrator<br/>(ROS 2 node)<br/>job state machine,<br/>loop routing, timeouts"]
@@ -50,13 +50,14 @@ flowchart LR
         end
         subgraph XFER["Transfer station (outside guarding)"]
             STOP["Stop station"]
-            PUSH["Pusher (SMC EtherNet/IP valve bank)<br/>transfer_mode = A (default)"]
-            CHUTE["Padded chute"]
+            PUSH["Stop-station gate<br/>transfer_mode = B (chosen)"]
+            CHUTE["Gravity chute (padded)"]
             PE["Part-present photoeye"]
         end
     end
     WV["Service laptop - WorkVisual<br/>(direct to KR C4 X69 / KSI)"]
     STUDIO["Windows laptop - Studio 5000"]
+    IGN["Ignition HMI<br/>(FlexBase operator screen)"]
 
     LAP -- "HTTP + API key" --> REST
     GUI --- CORE
@@ -76,6 +77,7 @@ flowchart LR
     CONV --> STOP --> PUSH --> CHUTE --> BIN
     WV -.-> KRC
     STUDIO -.-> PLC
+    IGN -- "OPC UA / Logix driver" --> PLC
 ```
 
 Solid lines are runtime data paths; dashed lines are safety or service
@@ -89,6 +91,12 @@ PLC, and the PLC decides.**
 Carried over from the old design (see [`AUDIT.md`](AUDIT.md)) and extended in
 the **Station HMI Upgrade** stage.
 
+**Split of screens (team decision):** **Ignition** is the HMI for the FlexBase
+cell (§3.1a). The station GUI is the HMI for **orders, inventory and the
+TurtleBot**. It shows only a small read-only cell summary (link, mode, fault,
+"SIMULATED SAFETY" banner) taken from `/apex/cell_status`, so operators do not
+get two competing cell screens.
+
 - **Inventory**: parts, on-hand, reorder thresholds, CSV import/export,
   audited adjustments. Damaged parts go to a **quarantine** count; they are
   never restocked automatically.
@@ -96,12 +104,29 @@ the **Station HMI Upgrade** stage.
 - **Receiving**: per line OK / damaged / missing (must sum to the delivered
   quantity), discrepancy report.
 - **Status panels** (new): live map with TurtleBot pose, battery, dock state,
-  current job and bin contents; FlexBase PLC connection, **read-only** safety
-  state and a stack-light mirror; KUKA mode (T1/T2/AUT/AUT EXT),
-  ready/busy/fault and current program; job queue; quarantine view.
+  current job, route direction and bin count; a compact **read-only** cell
+  summary (PLC link, cell mode, fault text, KUKA ready); job queue; quarantine
+  view. Full cell / KUKA / safety screens live in Ignition.
 - **REST API** for the workstation laptop (kept).
 - `StationCore` **owns the SQLite database**. The orchestrator reports job
   events; `StationCore` books them into inventory, so there is one writer.
+
+### 3.1a FlexBase HMI: Ignition
+
+- Ignition (Inductive Automation) is the operator HMI for the cell: cell mode,
+  conveyor, stop station, chute count, KUKA mode/ready/busy/fault/program,
+  stack light, alarms, and the **read-only** safety status the PLC exposes.
+- It connects to the Compact GuardLogix with Ignition's Allen-Bradley Logix
+  driver (or OPC UA) on the **lab network only**.
+- Ignition screens use the **same `APEX_ToStation` / `APEX_FromStation` tags**
+  as the station software (`ros2_ws/src/apex_bringup/config/plc_tags.yaml`), so
+  there is one tag contract. Any Ignition button that requests an action
+  (start cycle, reset) writes a **standard-task request bit** and the PLC
+  decides; Ignition, like our Python code, never writes safety tags. Safety
+  resets stay on the hardwired acknowledge button outside the guarding. **⚠ RA**
+- Who owns which request bits (Ignition vs station) is defined in
+  `PLC_INTEGRATION.md` (Integration Documentation stage) to avoid two writers
+  for the same bit.
 
 ### 3.2 `apex_orchestrator` (ROS 2 node on the station PC)
 
@@ -265,10 +290,18 @@ point of control* principle and needs its own risk assessment. **⚠ RA**
 
 ### 3.6 Transfer station (conveyor → TurtleBot)
 
-- `transfer_mode` config: **A** (default) stop station + SMC EtherNet/IP
-  pneumatic pusher + padded chute; **B** gravity chute gated by a stop
-  station; **C** lift-and-locate + tilting tray + short chute. All three
-  share the same tag set; unused tags stay idle.
+- **Chosen: transfer mode B - gravity chute** (team decision). The conveyor
+  carries one part at a time to a stop station at the end of the run-out; the
+  PLC opens the stop (`StopStation_Release`) and the part slides down a padded
+  gravity chute into the TurtleBot's bin, which is parked under the chute
+  exit outside the guarding.
+- `transfer_mode` stays configurable (`lab.yaml`, `cell_sim.yaml`): **A** stop
+  station + SMC pusher + chute; **B** gravity chute (chosen); **C**
+  lift-and-locate + tilting tray. All three share the same tag set.
+- Chute geometry (sim, `[TBD]` on the real cell): top at the conveyor height
+  (0.85 m), exit at 0.55 m above the floor, 0.28 m horizontal run, 0.20 m
+  wide. The exit must clear the TurtleBot (0.351 m) plus the bin, and the
+  drop into the bin must be short enough not to damage parts.
 - A **part-present photoeye** counts every part landing in the bin. The
   orchestrator compares the count with the order; a shortfall is a
   **"not loaded"** discrepancy, distinct from *missing at delivery*.
@@ -280,7 +313,7 @@ point of control* principle and needs its own risk assessment. **⚠ RA**
 
 | Package | Contents |
 |---|---|
-| `apex_interfaces` | msgs: `JobStatus`, `RobotStatus`, `CellStatus`, `ArmStatus`, `BinContents`, `OrderLine`; srvs: `SubmitJob`, `CancelJob`, `ConfirmReceipt`, `ConfirmReturn`, `ResetFault` |
+| `apex_interfaces` | msgs: `OrderLine`, `LineReceipt`, `JobStatus`, `JobEvent`, `CellStatus`, `ArmStatus`; srvs: `SubmitJob`, `ConfirmReceipt`, `ConfirmReturn`, `ResolveShortfall`, `Operator` (stop/reset/resume/cancel), `WriteTag` (bridge only, allow-listed) |
 | `apex_orchestrator` | job state machine node, loop router, pose/route YAML loader |
 | `apex_plc_bridge` | `pycomm3` tag client with write allow-list; a sim backend talking to `apex_cell_sim` |
 | `apex_cell_sim` | imitation GuardLogix + KUKA + conveyor + transfer (same tags, timing from YAML, fault injection), timed part spawn into the bin in Gazebo |
@@ -299,12 +332,18 @@ point of control* principle and needs its own risk assessment. **⚠ RA**
 
 ## 6. Simulation
 
-Everything runs without hardware: Gazebo (via `turtlebot4_simulator`,
+Everything runs without hardware: Gazebo Harmonic (via `turtlebot4_simulator`,
 `jazzy`) with our lab world, Nav2 on the simulated TurtleBot, `apex_cell_sim`
-in place of the PLC, KUKA and transfer station, the real orchestrator, and
-the real GUI. Planned demos: (a) full order end to end, (b) a blocked
-corridor with a reroute the other way round the loop, (c) a damaged-part
-return trip.
+in place of the PLC, KUKA and transfer station, and the real orchestrator.
+Demos: (a) full order end to end, (b) a blocked corridor with a reroute the
+other way round the loop, (c) a damaged-part return trip. Built in the
+**Simulation Bring-up** stage - see [`SIMULATION.md`](SIMULATION.md).
+
+The Gazebo model of the lab also serves the TurtleBot directly (team
+decision): the occupancy map generated from `lab.yaml` is the robot's first
+map until a SLAM map of the real room exists, and the same world is the
+training environment for the **Learning-Based Navigation** stage
+([`ROADMAP.md`](ROADMAP.md)).
 
 ## 7. Network
 
