@@ -23,3 +23,7 @@ ros2_ws/log/
 *.db-wal
 *.db-shm
 logs/
+
+# Station runtime data
+station/data/
+station/logs/

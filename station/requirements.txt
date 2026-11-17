@@ -1,0 +1,14 @@
+# APEx 2.0 main station (Windows / macOS / Linux, Python 3.10+)
+#
+#   python -m pip install -r station/requirements.txt
+#
+# ROS mode on Ubuntu 24.04 + Jazzy: create the venv with --system-site-packages so rclpy and
+# apex_interfaces from the sourced workspace stay visible:
+#   python3 -m venv --system-site-packages ~/apex-venv && . ~/apex-venv/bin/activate
+PySide6>=6.6          # Qt GUI
+fastapi>=0.110        # REST API for the workstation laptop
+uvicorn>=0.27         # ASGI server (background thread)
+pydantic>=2.5         # request validation
+PyYAML>=6.0           # configuration
+httpx>=0.27           # FastAPI TestClient (tests)
+pytest>=7.0           # tests

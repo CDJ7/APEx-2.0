@@ -1,0 +1,36 @@
+# APEx 2.0 main station configuration (Station HMI Upgrade).
+# Paths are relative to this file's folder unless absolute.
+
+station:
+  name: APEx Main Station
+  db_path: ../data/station.db          # SQLite (git-ignored)
+  operator: operator                   # default actor name in the audit log
+  auto_approve: true                   # new orders go straight to the job queue
+  seed_demo_data: true                 # fill an EMPTY database with demo parts
+  max_lines_per_order: 10              # = plc_tags.yaml max_lines (PLC array size)
+  max_units_per_order: 20              # [TBD] bin size / 9 kg payload budget (Q-S4)
+
+# Delivery destinations shown to users -> pose names in ros2_ws/src/apex_bringup/config/lab.yaml
+destinations:
+  Station A: station_a
+  Station B: station_b
+
+# How the station reaches the orchestrator.
+#   sim  - built-in simulation (job machine + cell simulator + kinematic robot in this process);
+#          runs anywhere, no ROS needed. Shows SIMULATION and SIMULATED SAFETY banners.
+#   ros  - ROS 2: talks to apex_orchestrator / apex_plc_bridge (apex.launch.py must be running).
+link:
+  mode: sim
+  sim_time_scale: 4.0                  # built-in simulation speed (1 = real time)
+  ros_timeout_s: 5.0                   # service call timeout
+
+rest:
+  enabled: true
+  host: 0.0.0.0                        # bind address (lab network); 127.0.0.1 = this PC only
+  port: 8000
+  api_key: change-me-apex-2            # CHANGE before the station is on any shared network
+  allowed_ips: []                      # e.g. [192.168.50.21] for the workstation laptop; [] = any
+
+logging:
+  dir: ../logs
+  level: INFO
