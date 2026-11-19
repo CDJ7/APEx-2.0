@@ -21,6 +21,7 @@ class AppContext:
     toasts: ToastManager
     rest: Any = None             # RestServer (None in tests / --no-rest)
     operator: str = "operator"
+    sensors: Any = None          # SensorFeed (None = no sensor feed; Sensors page shows how to enable it)
 
     def toast(self, level: str, text: str) -> None:
         self.toasts.show(level, text)

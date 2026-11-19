@@ -2,6 +2,7 @@
 
     python -m apex_station.app                 # built-in simulation (default in station.yaml)
     python -m apex_station.app --link ros      # ROS 2: apex.launch.py must be running
+    python -m apex_station.app --sensors ros   # + live lidar / camera from the TurtleBot (Sensors page)
     python -m apex_station.app --db /tmp/x.db --no-rest
 
 Threads: the Qt GUI thread; the job link (simulation loop or ROS spin); the job submitter;
@@ -22,6 +23,7 @@ from PySide6.QtWidgets import QApplication
 from apex_station.config import Config
 from apex_station.core.database import Database
 from apex_station.core.station import StationCore
+from apex_station.sensors import make_sensor_feed
 from apex_station.ui.bridge import QtBridge, QtLogHandler
 from apex_station.ui.main_window import MainWindow
 from apex_station.ui.pages.base import AppContext
@@ -55,11 +57,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--db", help="override station.db_path")
     ap.add_argument("--no-rest", action="store_true", help="do not start the REST API")
     ap.add_argument("--time-scale", type=float, help="built-in simulation speed")
+    ap.add_argument("--sensors", choices=["off", "ros"],
+                    help="override sensors.mode: ros = live lidar + camera from the TurtleBot (Sensors page)")
     args, qt_args = ap.parse_known_args(argv)
 
     overrides = {}
     if args.link:
         overrides["link.mode"] = args.link
+    if args.sensors:
+        overrides["sensors.mode"] = args.sensors
     if args.time_scale:
         overrides["link.sim_time_scale"] = args.time_scale
     cfg = Config.load(args.config, overrides)
@@ -77,20 +83,24 @@ def main(argv: list[str] | None = None) -> int:
         from apex_station.net.rest_api import RestServer
         rest = RestServer(core, cfg)
 
+    sensors = make_sensor_feed(cfg)
+
     def make_ctx(toasts):
         return AppContext(cfg=cfg, core=core, bridge=bridge, toasts=toasts, rest=rest,
-                          operator=str(cfg.get("station.operator", "operator")))
+                          operator=str(cfg.get("station.operator", "operator")), sensors=sensors)
 
     win = MainWindow(make_ctx)
     win.show()
     core.start()
+    sensors.start()
     if rest:
         rest.start()
-    log.info("main station started (link=%s, db=%s)", core.link.mode, core.db.path)
+    log.info("main station started (link=%s, sensors=%s, db=%s)", core.link.mode, sensors.mode, core.db.path)
     rc = app.exec()
     log.info("shutting down")
     if rest:
         rest.stop()
+    sensors.stop()
     core.stop()
     return rc
 

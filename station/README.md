@@ -59,6 +59,20 @@ topics `/apex/job_status`, `/apex/job_events`) and reads the cell summary from
 Do not run the demo client and the station GUI against the same orchestrator at the same
 time - both would answer receipts.
 
+### Live lidar + camera from the real TurtleBot (Sensors page)
+
+```bash
+source /opt/ros/jazzy/setup.bash
+export ROS_DOMAIN_ID=0 RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+. ~/apex-venv/bin/activate                     # venv made with --system-site-packages (sees rclpy)
+cd ~/APEx-2.0/station
+python -m apex_station.app --sensors ros       # works with the built-in simulation link too
+```
+
+The laptop must be on the lab router with the robot on Wi-Fi and undocked - see
+[`docs/TURTLEBOT_NETWORK.md`](../docs/TURTLEBOT_NETWORK.md) for setup, the time sync and
+troubleshooting. The sensor feed is independent of the job link and needs no orchestrator.
+
 ---
 
 ## 2. Pages
@@ -69,6 +83,7 @@ time - both would answer receipts.
 | **Orders** | *New order*: pick parts (only parts with a PLC part code - i.e. stored in the FlexBase), quantities, destination, priority; stock is reserved at once. *Orders & jobs*: every order with status, job id, lines (ordered / not loaded / OK / damaged / missing) and the full job timeline from the orchestrator; approve / cancel |
 | **Receiving** | The worker's condition report at the station: OK + damaged + missing must equal what was **loaded** for each line. Confirming sends the receipt to the orchestrator (the robot may leave) and then books it. A second confirmation asks that hands are out of the bin (RA-10) |
 | **Robot & Cell** | Live map, job step with chute count, queue and fault text, **STOP / Reset / Resume**, TurtleBot battery / dock / pose, the read-only FlexBase + KUKA summary, simulation panel (built-in simulation only) |
+| **Sensors** | Read-only live view of the real TurtleBot (`--sensors ros`): OAK-D RGB preview and a top-down lidar plot (front up, range rings), with rate, age, **clock offset** (flags a wrong robot clock), point count and nearest obstacle. **Start lidar / Start camera** buttons (the robot stops both on the dock); nothing here moves the robot |
 | **Inventory** | Parts master data: slot, **PLC part code** (selects the KRL pick program; 0 = not in the cell), on hand, quarantine, reorder threshold; add / edit / audited stock adjustment / delete; CSV import & export |
 | **Quarantine** | Discrepancies - *Damaged*, *Missing* (at delivery), *NotLoaded* (chute short count), *ReturnMismatch* - resolved with a note; not-loaded / missing parts that turn up can be restocked. Quarantine stock (damaged units, never restocked) with disposal |
 | **Logs** | Audit log (who, from where - `gui`, `rest:<ip>`, `orchestrator`), job events, live application log |
@@ -168,6 +183,10 @@ curl -H "X-API-Key: change-me-apex-2" -H "Content-Type: application/json" -X POS
 | `destinations` | display name → pose name in `lab.yaml` |
 | `link.mode` | `sim` (built-in simulation) or `ros` |
 | `link.sim_time_scale`, `link.ros_timeout_s` | simulation speed, service timeout |
+| `sensors.mode` | `"off"` (default) or `"ros"` - live lidar + camera on the Sensors page; quote `"off"` (plain `off` is a YAML boolean) |
+| `sensors.scan_topic`, `sensors.image_topic` | `/scan`, `/oakd/rgb/preview/image_raw` |
+| `sensors.lidar_start_service`, `sensors.camera_start_service` | `/start_motor` (Empty), `/oakd/start_camera` (Trigger) |
+| `sensors.base_frame`, `sensors.lidar_yaw_deg` | robot frame and lidar mount yaw used until `/tf_static` arrives (TurtleBot 4: 90) |
 | `rest.*` | enabled, host, port, api_key, allowed_ips |
 | `logging.*` | log folder (rotating `station.log`) and level |
 
@@ -192,6 +211,9 @@ station/
 │   │   ├── base.py          JobLink interface + status schema
 │   │   ├── local_link.py    built-in simulation (job machine + cell model + kinematic robot)
 │   │   └── ros_link.py      ROS 2 client of apex_orchestrator / apex_plc_bridge
+│   ├── sensors/
+│   │   ├── feed.py          sensor frames, scan geometry, rate meter, "off" + sample feeds (no Qt, no ROS)
+│   │   └── ros_feed.py      ROS 2 subscriber for /scan + camera (own rclpy context and thread)
 │   ├── net/rest_api.py      FastAPI for the workstation laptop
 │   └── ui/                  theme, widgets, bridge, map_view, actions, main_window, pages/*
 ├── config/station.yaml
@@ -202,19 +224,24 @@ station/
 ## 8. Tests
 
 ```bash
-python -m pytest station/tests -q        # 20 tests, ~10 s; GUI tests run offscreen
+python -m pytest station/tests -q        # 29 tests, ~10 s; GUI tests run offscreen
 ```
 
 * `test_station_flow.py` - full order, receipt rules, damaged return to quarantine, shortfall
   send / cancel, cancel rules, fault Reset → Resume, operator STOP, validation, reroute.
 * `test_rest_api.py` - API key, IP allow-list, full order over HTTP, no PLC/safety endpoints.
 * `test_gui.py` - every page builds; receiving page closes an order; Robot & Cell shows a fault.
+* `test_sensors.py` - scan geometry and lidar mount yaw, rate meter, config modes; the Sensors
+  page with sample data (live values, wrong-clock warning, no-feed notice, start buttons).
 * `test_ros_link.py` - the station's ROS link against the **real** orchestrator and PLC-bridge
   nodes (rclpy stand-in from `ros2_ws/tests/ros_fakes.py`, real cell simulator over TCP).
 
 ## 9. Needs testing with ROS / hardware
 
 * `RosJobLink` against a real ROS 2 graph (only tested with the rclpy stand-in so far).
+* `RosSensorFeed` (Sensors page) with the real TurtleBot: on 2026-11-18 it received and drew
+  real lidar scans (459/720 valid points, clock offset -0.10 s) before the robot dropped off the
+  network; the camera view and the Start buttons still need a run with the robot online.
 * The station GUI next to Gazebo (`--link ros`) for demos (a)-(c).
 * Touch-screen use at the station PC (button sizes), and the workstation laptop over the lab
   network with `rest.allowed_ips` set.
