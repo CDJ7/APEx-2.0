@@ -51,7 +51,7 @@ receiving, and the network command interface) are carried over.
 5. [Lab layout](#5-lab-layout)
 6. [Networking](#6-networking)
 7. [Repository layout](#7-repository-layout)
-8. [Getting started](#8-getting-started)
+8. [Getting started](#8-getting-started) - including [mapping the lab](#mapping-the-lab-with-the-real-turtlebot)
 9. [Documents](#9-documents)
 10. [Open questions and decisions](#10-open-questions-and-decisions)
 
@@ -226,6 +226,70 @@ ros2 launch apex_bringup demo.launch.py scenario:=return     # (c) damaged-part 
 
 Step-by-step instructions, expected output and troubleshooting:
 [`docs/SIMULATION.md`](docs/SIMULATION.md).
+
+### Mapping the lab with the real TurtleBot
+
+The robot builds a map of the room from its lidar while you drive it (SLAM with
+`slam_toolbox`, running on the laptop). Nav2 uses that map later to drive itself to the
+stations. Network and laptop setup: [`docs/TURTLEBOT_NETWORK.md`](docs/TURTLEBOT_NETWORK.md).
+
+**1. Prepare the room (5 min)**
+- Laptop cabled to a LAN port on the lab router; robot charged (above 40 %) and on Wi-Fi (its
+  screen shows `192.168.0.3`).
+- Put away bags, chairs and anything that moves. The map should only contain what stays:
+  walls, benches, the FlexBase, the stations, the dock.
+- Close doors that should count as walls. People walking through the room are fine, but keep
+  them out of the robot's way.
+
+**2. Start**
+
+```bash
+source /opt/ros/jazzy/setup.bash
+export ROS_DOMAIN_ID=0 RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+. ~/apex-venv/bin/activate && cd ~/APEx-2.0/station
+python -m apex_station.app --sensors ros
+```
+
+- **Sensors** tab: lidar and camera live, and *Clock offset* under 1 s (green).
+- **Drive & Map** tab: press **Start mapping**. Within a few seconds the map appears with the
+  robot as a blue dot. Then tick **Driving enabled**.
+
+**3. Drive**
+- **Start next to the dock** and back off it with `S`. The dock is the robot's daily starting
+  point, so the map should be built from there.
+- **Go slowly:** 0.15-0.2 m/s and gentle turns. Fast turns smear walls. Pause for a second
+  after each turn.
+- **Follow the walls first:** go once around the room, about 0.5-1 m from the walls, so the
+  lidar sees every wall at an angle.
+- **Then the middle:** drive around the FlexBase, the island and between the benches.
+- **Then the robot's own routes:** dock → transfer chute → each delivery station → return bin.
+- **Watch the map as you go.** White is free space, black is walls, grey is not seen yet. Fill
+  the grey gaps you care about.
+- **Close the loop:** end where you started and drive over the start area again for a few
+  seconds. When slam_toolbox recognizes the place, the map snaps straight; doubled or bent
+  walls mean the loop is not closed yet.
+
+**4. Save**
+- Name it **`lab_real`** and press **Save map**. This writes `~/apex_maps/lab_real.yaml` +
+  `.pgm` (the path the real-robot launch file expects) and a timestamped backup on every save.
+  Save again whenever the map looks better.
+- Then **Stop mapping**, and drive the robot back onto the dock.
+
+**5. Check and fix the map**
+- **Good map:** straight, single walls; rooms closed off by black lines; no ghost copies of
+  walls. If walls are doubled or the map is twisted, press **Stop mapping** and start again,
+  driving slower with more pauses.
+- **Glass walls and doors:** the lidar sees through glass. They show up as gaps with long
+  white rays going through, and Nav2 would try to drive through them. Open
+  `~/apex_maps/lab_real.pgm` in an image editor (GIMP), draw **black lines** (2 px) along the
+  glass, and save as `.pgm`.
+- **Remove junk:** paint over temporary objects (a forgotten chair) in light grey/white.
+
+**6. Next steps** (in [`docs/TURTLEBOT_STATUS.md`](docs/TURTLEBOT_STATUS.md), tasks M3-M4 and
+N1): align the map to the `lab.yaml` frame, mark keepout areas, then navigate with
+`ros2 launch apex_bringup robot.launch.py map:=$HOME/apex_maps/lab_real.yaml`. Maps stay in
+`~/apex_maps` on the laptop. Copy the final, cleaned map into
+`ros2_ws/src/apex_bringup/maps/` to share it through the repo.
 
 **Reference material:**
 
