@@ -28,7 +28,7 @@ from apex_station.config import Config  # noqa: E402
 from apex_station.core.database import Database  # noqa: E402
 from apex_station.core.station import StationCore  # noqa: E402
 from apex_station.links.local_link import LocalJobLink  # noqa: E402
-from apex_station.sensors.feed import ImageFrame, ScanFrame, StaticSensorFeed  # noqa: E402
+from apex_station.sensors.feed import ImageFrame, MapFrame, Pose2D, ScanFrame, StaticSensorFeed  # noqa: E402
 from apex_station.ui.bridge import QtBridge  # noqa: E402
 from apex_station.ui.main_window import NAV, MainWindow  # noqa: E402
 from apex_station.ui.pages.base import AppContext  # noqa: E402
@@ -93,7 +93,20 @@ def sample_sensors() -> StaticSensorFeed:
         for x in range(w):
             px += bytes((40 + x * 120 // w, 60 + y * 100 // h, 90))          # BGR gradient
     img = ImageFrame(now, now, "oakd_rgb_camera_optical_frame", w, h, w * 3, "bgr8", bytes(px))
-    return StaticSensorFeed(scan=scan, image=img, scan_hz=8.6, image_hz=19.0)
+    # SLAM-style map of the same room: 5 cm cells, 1 m of unknown around it, walls, a box, a glass gap
+    res, pad = 0.05, 20
+    cw, ch = int(6.0 / res), int(4.0 / res)
+    W, H = cw + 2 * pad, ch + 2 * pad
+    cells = bytearray([255] * (W * H))
+    for r in range(pad, pad + ch + 1):
+        for c in range(pad, pad + cw + 1):
+            wall = r in (pad, pad + ch) or c in (pad, pad + cw)
+            glass = c == pad + cw and pad + 20 < r < pad + 50          # lidar sees through glass: no wall
+            box = pad + 50 <= c <= pad + 62 and pad + 58 <= r <= pad + 66
+            cells[r * W + c] = 100 if (wall and not glass) or box else 0
+    grid = MapFrame(now, W, H, res, -3.0 - pad * res, -2.0 - pad * res, bytes(cells))
+    return StaticSensorFeed(scan=scan, image=img, scan_hz=8.6, image_hz=19.0, map=grid,
+                            pose=Pose2D(0.0, 0.0, 0.0, now))
 
 
 def main() -> int:

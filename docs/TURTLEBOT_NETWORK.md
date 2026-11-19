@@ -1,8 +1,8 @@
 # TurtleBot 4 on the lab router
 
 How to reach the real TurtleBot 4 from the station laptop over Wi-Fi: addresses,
-one-time setup, daily use (terminal and the station GUI's **Sensors** page), the
-clock-sync chain, every change made on the robot, and what to do when something
+one-time setup, daily use (terminal, the station GUI's **Sensors** and **Drive & Map** pages),
+mapping the lab, the clock-sync chain, every change made on the robot, and what to do when something
 stops working. Set up on 2026-11-18 (robot image v2.0.2, ROS 2 Jazzy); moved to the Nighthawk
 R6700v3 router on 2026-11-19.
 
@@ -37,9 +37,10 @@ R6700v3 router on 2026-11-19.
 
    Close the GUI or leave the Sensors page when you don't need the camera. The camera stream
    is the heaviest thing on the Wi-Fi link.
-6. **Drive it with the keyboard** (robot on the floor):
-   `python3 ~/APEx-2.0/station/tools/teleop_wasd.py`. See
-   [Driving with the keyboard](#driving-with-the-keyboard-w-a-s-d).
+6. **Drive and map** (robot on the floor): in the same GUI open **Drive & Map** (Ctrl+6), tick
+   **Driving enabled** and hold W A S D. See [Drive & Map page](#station-gui---drive--map-page)
+   and [Mapping the lab](#mapping-the-lab). The terminal driver
+   (`station/tools/teleop_wasd.py`) still works but stops ~0.6 s later.
 
 ## Addresses
 
@@ -140,7 +141,27 @@ need the orchestrator.
 *(Screenshot uses the built-in sample data. Verified with the real robot on 2026-11-18:
 camera 10.0 fps, lidar 7.6 Hz, clock offsets -0.08 s / -0.01 s, 0% ping loss while streaming.)*
 
-### Driving with the keyboard (W A S D)
+### Station GUI - Drive & Map page
+
+**Put the robot on the floor, in a clear area, and watch it.** This is a software control, not
+an emergency stop. Lifting the robot stops the wheels, and the Create 3's cliff and bump safety
+stays on.
+
+- Tick **Driving enabled**, then **hold** keys: `W`/`S` forward/back, `A`/`D` turn, `W`+`A` /
+  `W`+`D` curve. Speed and turn rate are set next to the switch (default 0.2 m/s, 1.0 rad/s;
+  capped at 0.306 m/s, 1.9 rad/s).
+- **The robot stops the moment you release the keys.** It also stops on `Space` / `X` / `Esc`,
+  the page's **STOP** button, the header STOP (F12), when you click another window or tab, and
+  if the GUI freezes (the command must be refreshed every 50 ms or the station sends zero and
+  falls silent).
+- The note next to the switch says **Ready** when the robot is listening on `/cmd_vel`.
+- Driving is blocked while an orchestrator job runs (`--link ros`), so it never fights Nav2.
+- The small start delay left is the Create 3's own acceleration ramp (a safety limit) plus Wi-Fi.
+- The same page shows the camera, the lidar and the live **map**.
+
+### Driving from a terminal (W A S D)
+
+The GUI page above is preferred. This terminal tool needs no GUI:
 
 **Put the robot on the floor, in a clear area, and watch it.** This is a software control, not
 an emergency stop. Lifting the robot stops the wheels, and the Create 3's cliff and bump
@@ -161,12 +182,42 @@ python3 ~/APEx-2.0/station/tools/teleop_wasd.py        # add --dry-run to try th
 | `+` / `-` | faster / slower |
 | `Esc` or `Ctrl-C` | stop and quit |
 
-- **Hold to drive:** the robot stops about 0.6 s after you let go of the key.
+- **Hold to drive:** the robot stops about 0.6 s after you let go of the key (a terminal cannot
+  see key releases, so it waits for the key repeat to stop - the GUI page stops at once).
 - **Speed:** starts at 0.2 m/s and 1.0 rad/s, capped at the Create 3's 0.306 m/s and 1.9 rad/s.
 - **Messages:** it publishes `geometry_msgs/TwistStamped` on `/cmd_vel`, the Jazzy TurtleBot 4 format, and sends zero velocity when it exits.
 - **Check the connection:** the status line shows `listeners 1` when the robot is receiving.
 - **Leaving the dock:** back off it with `s`.
 - **Don't use two drivers at once:** keep the Sensors page's camera off, or the GUI closed, if the Wi-Fi feels laggy while driving. Don't drive with a joystick at the same time.
+
+## Mapping the lab
+
+A lidar map of the room for Nav2, recorded with **slam_toolbox** running on the laptop (the
+robot's Pi is too slow for it). The task is M2 in [`TURTLEBOT_STATUS.md`](TURTLEBOT_STATUS.md).
+
+1. Check *Clock offset* on the Sensors page is under 1 s. SLAM combines the robot's odometry
+   and the laptop's processing, so the clocks must agree.
+2. Clear the floor of bags and chairs that won't stay. Close doors that should count as walls.
+3. Open **Drive & Map**, press **Start mapping**. The map appears within a few seconds, with
+   the robot as a blue dot and green arrow.
+4. Tick **Driving enabled** and drive **slowly** (0.15-0.2 m/s, gentle turns). Go along every
+   wall, around the FlexBase and the island, past the stations, dock and return bin. Keep about
+   0.5 m from walls so the lidar sees them at an angle.
+5. **Close the loop:** finish where you started and drive a little over the start again. The
+   map snaps straight when slam_toolbox recognizes the place.
+6. Press **Save map** (name `lab_real`). This writes `~/apex_maps/lab_real.yaml` + `.pgm`, the
+   path `apex_bringup/launch/robot.launch.py` expects, plus a timestamped copy of every save.
+7. **Stop mapping**. Closing the GUI also stops slam_toolbox.
+
+**Glass walls and doors.** The lidar sees through glass, so glass walls appear as gaps (often
+with long white rays reaching the room beyond) and Nav2 would plan through them. After
+saving, draw them in as walls: open `~/apex_maps/lab_real.pgm` in an image editor (GIMP) and
+draw black lines (1-2 px) where the glass is, then save it as .pgm. Glass is also a candidate
+for the keepout mask (task M4). Drive past the glass slowly: the robot's bumper still works,
+but the lidar may not stop Nav2 in time.
+
+Saved maps stay on the laptop (`~/apex_maps`), not in the repo. Copy the final one into
+`ros2_ws/src/apex_bringup/maps/` once it is cleaned up and aligned (task M3).
 
 ## Time sync
 
