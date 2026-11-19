@@ -58,8 +58,7 @@ def build_scenario(core: StationCore, link: LocalJobLink) -> None:
     ln = core.orders.get(a["id"])["lines"]
     core.receive_order(a["id"], [{"line_id": ln[0]["id"], "ok": 2}, {"line_id": ln[1]["id"], "ok": 0, "damaged": 1,
                                                                     "notes": "seal torn"}], actor="bob")
-    run(lambda: core.job_status()["step"] == "AWAIT_RETURN_CONFIRM")
-    core.confirm_return(a["id"], 1)
+    run(lambda: core.inventory.get_by_number("BRG-6204-2RS")["damaged_qty"] == 1)   # tray tilted into the bin
     b = core.create_order("dana", "Station B", [{"part_number": "SNS-PROX-M12", "quantity": 2}])
     run(lambda: st(b["id"]) == "InTransit")
     link.inject_fault("lost_part", 2)

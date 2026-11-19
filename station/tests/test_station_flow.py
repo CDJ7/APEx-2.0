@@ -40,16 +40,36 @@ def test_receipt_must_match_loaded_and_order_must_be_delivered(sim):
     assert len(d) == 1 and d[0]["quantity"] == 1
 
 
-def test_damaged_parts_return_to_quarantine(sim):
+def test_damaged_parts_tilt_into_return_bin_and_go_to_quarantine(sim):
     o = sim.core.create_order("alice", "Station B", [{"part_number": "BLT-M8x25", "quantity": 3}])
     assert sim.run_until(lambda: sim.order_status(o["id"]) == "Delivered")
     line = sim.core.orders.get(o["id"])["lines"][0]
     sim.core.receive_order(o["id"], [{"line_id": line["id"], "ok": 1, "damaged": 2}])
-    assert sim.run_until(lambda: sim.job_step() == "AWAIT_RETURN_CONFIRM")
-    res = sim.core.confirm_return(o["id"], 1)                 # operator finds only one in the return bin
-    assert res == {"expected": 2, "booked": 1, "mismatch": 1}
-    assert _qty(sim, "BLT-M8x25")["damaged_qty"] == 1
-    assert len(sim.core.orders.discrepancies(kind="ReturnMismatch")) == 1
+    assert sim.run_until(lambda: sim.job_step() == "RETURN_DUMP")
+    assert sim.run_until(lambda: _qty(sim, "BLT-M8x25")["damaged_qty"] == 2)    # booked automatically
+    assert not sim.core.orders.pending_returns(o["id"])
+    assert sim.run_until(sim.idle_docked)
+    assert sim.link.tilt.ctrl.cycles == 1 and sim.core.status()["robot"]["tray"] == "FLAT"
+
+
+def test_tray_jam_needs_home_reset_resume(sim):
+    o = sim.core.create_order("alice", "Station B", [{"part_number": "BLT-M8x25", "quantity": 2}])
+    assert sim.run_until(lambda: sim.order_status(o["id"]) == "Delivered")
+    line = sim.core.orders.get(o["id"])["lines"][0]
+    sim.core.receive_order(o["id"], [{"line_id": line["id"], "ok": 1, "damaged": 1}])
+    assert sim.run_until(lambda: sim.core.status()["robot"]["tray"] == "TILTING")
+    sim.link.inject_fault("tray_jam", True)
+    assert sim.run_until(lambda: sim.job_step() == "FAULT")
+    assert sim.core.job_status()["fault_code"] == "TILT_FAILED"
+    sim.link.clear_faults()
+    for _ in range(15):
+        sim.step()
+    sim.core.operator_command("tray_home")
+    assert sim.run_until(lambda: sim.core.status()["robot"]["tray"] == "FLAT")
+    sim.core.operator_command("reset")
+    assert sim.run_until(lambda: sim.job_step() == "RESUME_WAIT")
+    sim.core.operator_command("resume")
+    assert sim.run_until(lambda: _qty(sim, "BLT-M8x25")["damaged_qty"] == 1)
     assert sim.run_until(sim.idle_docked)
 
 

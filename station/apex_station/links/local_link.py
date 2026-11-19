@@ -30,6 +30,7 @@ from apex_orchestrator.router import LoopRouter  # noqa: E402
 from apex_orchestrator.sim_nav import KinematicNav, barriers_from_lab  # noqa: E402
 from apex_plc_bridge.client import InProcessBackend, PlcClient  # noqa: E402
 from apex_plc_bridge.tags import TagSpec  # noqa: E402
+from apex_tilt.port import InProcessTilt  # noqa: E402
 
 from apex_station.links.base import (  # noqa: E402
     CELL_MODES, KUKA_MODES, EventCallback, JobLink, LinkError, StatusCallback, empty_status,
@@ -47,14 +48,15 @@ class LocalJobLink(JobLink):
         self.lab = LabModel.load()
         self.spec = TagSpec.load(config_file("plc_tags.yaml"))
         timeouts, policy, router_cfg = load_job_config(config_file("job_timeouts.yaml"))
-        self.cell = CellModel(self.spec, "B", timing or CellTiming(), FaultInjection())
+        self.cell = CellModel(self.spec, "D", timing or CellTiming(), FaultInjection())
         self.plc = PlcClient(self.spec, InProcessBackend(self.cell))
         self.plc.connect()
         dock = self.lab.poses["dock"]
         self.nav = KinematicNav(dock.x, dock.y, dock.yaw)
         self.poses = {n: (p.x, p.y, p.yaw) for n, p in self.lab.poses.items()}
+        self.tilt = InProcessTilt()          # the motorised return tray on the robot (simulated)
         self.machine = JobMachine(self.nav, self.plc, LoopRouter(list(self.lab.corners.values()), **router_cfg),
-                                  self.poses, timeouts, policy, on_event=self._on_machine_event)
+                                  self.poses, timeouts, policy, on_event=self._on_machine_event, tilt=self.tilt)
         self.time_scale = float(time_scale)
         self.period_s = period_s
         self._lock = threading.RLock()
@@ -92,6 +94,7 @@ class LocalJobLink(JobLink):
             self.nav.update(now)
             if self.nav.is_docked():
                 self.nav.battery = min(100.0, self.nav.battery + CHARGE_PCT_PER_S * dt)
+            self.tilt.update(now, moving=self.nav.status().value == "running")
             self.machine.tick(now)
             self._status = self._snapshot()
         self._on_status(self._status)
@@ -139,15 +142,21 @@ class LocalJobLink(JobLink):
 
     def operator(self, action: str, who: str, job_id: int = 0) -> None:
         fns = {"stop": lambda: self.machine.stop(who), "reset": lambda: self.machine.reset_fault(who),
-               "resume": lambda: self.machine.resume(who), "cancel": lambda: self.machine.cancel(int(job_id))}
+               "resume": lambda: self.machine.resume(who), "cancel": lambda: self.machine.cancel(int(job_id)),
+               "tray_home": lambda: self.machine.tray_home(who)}
         if action not in fns:
             raise LinkError(f"unknown operator action {action!r}")
         self._call(fns[action])
 
     # ------------------------------------------------------------------ simulation-only controls
     def inject_fault(self, name: str, value: Any) -> None:
-        """``no_ack`` / ``agv_not_detected`` (bool), ``pick_fail_part`` / ``lost_part`` (unit number or None)."""
+        """``no_ack`` / ``agv_not_detected`` (bool), ``pick_fail_part`` / ``lost_part`` (unit number or None),
+        ``tray_jam`` (bool: the return tray's motor stalls)."""
         with self._lock:
+            if name == "tray_jam":
+                self.tilt.ctrl.backend.jam = bool(value)
+                log.warning("SIM fault injection: tray_jam = %r", value)
+                return
             if not hasattr(self.cell.faults, name):
                 raise LinkError(f"unknown fault {name!r}")
             setattr(self.cell.faults, name, value)
@@ -156,6 +165,7 @@ class LocalJobLink(JobLink):
     def clear_faults(self) -> None:
         with self._lock:
             self.cell.faults = FaultInjection()
+            self.tilt.ctrl.backend.jam = False
 
     def set_obstacles(self, names: list[str]) -> None:
         """Place lab.yaml obstacles (``barrier_north`` / ``barrier_south``) in front of the simulated robot."""
@@ -185,7 +195,8 @@ class LocalJobLink(JobLink):
                     "expected": s["expected"], "counted": s["counted"], "queue": s["queue"],
                     "fault_code": s["fault_code"], "fault_text": s["fault_text"], "route": s["route"],
                     "route_xy": s["route_xy"], "blocked_xy": s["blocked_xy"], "not_loaded": s["not_loaded"]},
-            "robot": {"x": x, "y": y, "yaw": yaw, "battery": self.nav.battery_pct(), "docked": self.nav.is_docked()},
+            "robot": {"x": x, "y": y, "yaw": yaw, "battery": self.nav.battery_pct(), "docked": self.nav.is_docked(),
+                      "tray": self.tilt.state(), "tray_fault": self.tilt.fault_text()},
             "cell": {"connected": bool(t), "backend": "sim", "mode": int(t.get("Cell_Mode", 0)),
                      "mode_name": CELL_MODES.get(int(t.get("Cell_Mode", 0)), "?"),
                      "safety_ok": bool(t.get("Safety_OK")), "safety_simulated": bool(t.get("Safety_Simulated")),

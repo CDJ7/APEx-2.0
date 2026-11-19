@@ -29,18 +29,22 @@ from apex_station.core.database import Database  # noqa: E402
 def ros_station(tmp_path):
     bus = ros_fakes.install()
     spec = TagSpec.load(config_file("plc_tags.yaml"))
-    cell = CellSimServer(CellModel(spec, "B", CellTiming(pick=1.0, convey=0.5)), port=0, time_scale=20.0).start()
+    cell = CellSimServer(CellModel(spec, "D", CellTiming(pick=1.0, convey=0.5)), port=0, time_scale=20.0).start()
     prof = yaml.safe_load(config_file("network_school.yaml").read_text())
     prof["plc"]["sim_port"] = cell.port
     (tmp_path / "net.yaml").write_text(yaml.safe_dump(prof))
     bus.clock = cell.sim_time
     ros_fakes.Node.PARAMS = {"apex_plc_bridge": {"network_profile": str(tmp_path / "net.yaml")},
-                             "apex_orchestrator": {"nav_backend": "kinematic"}}
+                             "apex_orchestrator": {"nav_backend": "kinematic"},
+                             "tilt_platform": {"require_odom": False}}
     from apex_orchestrator.orchestrator_node import OrchestratorNode
     from apex_plc_bridge.bridge_node import PlcBridgeNode
     from apex_station.core.station import StationCore
     from apex_station.links.ros_link import RosJobLink
+    from apex_tilt.tilt_node import TiltNode
+    tilt = TiltNode()
     bridge, orch = PlcBridgeNode(), OrchestratorNode()
+    orch.timers.extend(tilt.timers)
     link = RosJobLink(timeout_s=1.0)
     cfg = Config.load(overrides={"station.db_path": ":memory:", "link.mode": "ros"})
     core = StationCore(cfg, Database(":memory:"), link)

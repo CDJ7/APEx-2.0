@@ -192,9 +192,10 @@ class StationCore:
 
     # ------------------------------------------------------------------ operator controls
     def operator_command(self, action: str, actor: str = "operator", source: str = "gui") -> None:
-        """``stop`` (halts the job immediately), ``reset`` (clears a fault - nothing moves), ``resume``."""
-        if action not in ("stop", "reset", "resume"):
-            raise ValidationError("action must be stop, reset or resume")
+        """``stop`` (halts the job immediately), ``reset`` (clears a fault - nothing moves), ``resume``,
+        ``tray_home`` (drive the robot's tilt tray back to flat after a tray fault; robot parked)."""
+        if action not in ("stop", "reset", "resume", "tray_home"):
+            raise ValidationError("action must be stop, reset, resume or tray_home")
         try:
             self.link.operator(action, f"{actor}@{source}")
             ok, detail = True, ""
@@ -305,6 +306,10 @@ class StationCore:
         elif kind == "step" and data.get("to") == STEP_AWAIT_RETURN:
             self.bus.notify("info", f"Robot at the return pose with damaged parts from order #{oid} - empty the "
                             "return bin and confirm the count")
+        elif kind == "return_dumped":
+            res = self.orders.book_returns(oid, int(data.get("count", 0)), "system", "orchestrator")
+            self.bus.notify("success", f"Order #{oid}: tray tilted - {res['booked']} damaged part(s) slid into the "
+                            "return bin and are booked into quarantine (count not verified)")
         elif kind == "receipt_reminder":
             self.bus.notify("warning", f"Order #{oid} is still waiting for its receipt at {order['destination']}")
         elif kind == "job_cancelled":
