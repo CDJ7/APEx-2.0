@@ -13,4 +13,7 @@ LiDAR mapping of the APEx lab with the real TurtleBot 4 (`slam_toolbox`). Two wa
 Both use `config/slam.yaml`. How-to: the README's *Mapping the lab* section and
 [`docs/MAPPING_ON_ROBOT.md`](../../../docs/MAPPING_ON_ROBOT.md).
 
-Adapted from the TourBot project - see [`NOTICE.md`](NOTICE.md) (not MIT-licensed).
+**Room 101:** [`Connor_Room101/`](Connor_Room101/) is the map of Room 101 (where the station is)
+and how to record it. Its `maps/` folder holds the finished map.
+
+Adapted from the TourBot project with their permission - see [`NOTICE.md`](NOTICE.md).

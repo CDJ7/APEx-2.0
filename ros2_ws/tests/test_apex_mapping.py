@@ -29,7 +29,16 @@ def test_scripts_compile_and_use_apex_paths():
 
 def test_origin_is_credited():
     notice = (PKG / "NOTICE.md").read_text()
-    assert "aidanjmartin/tourbot" in notice and "not** covered by the MIT" in notice
+    assert "aidanjmartin/tourbot" in notice and "permission" in notice.lower()
     for f in ("config/slam.yaml", "scripts/teleop_map.py", "scripts/teleop_map.sh", "tools/map_lab.sh",
               "tools/map_view.rviz"):
         assert "aidanjmartin/tourbot" in (PKG / f).read_text(), f
+
+
+def test_room101_folder():
+    room = PKG / "Connor_Room101"
+    assert (room / "README.md").exists() and (room / "maps" / "README.md").exists()
+    for y in (room / "maps").glob("*.yaml"):                  # any committed map must load
+        m = yaml.safe_load(y.read_text())
+        assert (room / "maps" / m["image"]).exists(), y
+        assert m["resolution"] > 0 and len(m["origin"]) == 3
