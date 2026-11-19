@@ -3,7 +3,7 @@
 
     python3 -m apex_orchestrator.demo full        # (a) full order end to end
     python3 -m apex_orchestrator.demo reroute     # (b) north corridor blocked -> reroute the other way
-    python3 -m apex_orchestrator.demo return      # (c) damaged-part return trip
+    python3 -m apex_orchestrator.demo return      # (c) damaged-part return: tray tilts into the return bin
     python3 -m apex_orchestrator.demo shortfall   # extra: a part never reaches the bin -> operator decides
     python3 -m apex_orchestrator.demo all
 
@@ -28,6 +28,7 @@ from apex_orchestrator.router import LoopRouter
 from apex_orchestrator.sim_nav import KinematicNav, barriers_from_lab
 from apex_plc_bridge.client import PlcClient, SimBackend
 from apex_plc_bridge.tags import TagSpec
+from apex_tilt.port import InProcessTilt
 
 CFG = config_dir()
 
@@ -41,7 +42,7 @@ class Demo:
         self.lab = LabModel.load(CFG / "lab.yaml")
         spec = TagSpec.load(CFG / "plc_tags.yaml")
         timing = CellTiming(pick=6.0, convey=4.0)
-        self.cell = CellSimServer(CellModel(spec, "B", timing, faults or FaultInjection()), port=0,
+        self.cell = CellSimServer(CellModel(spec, "D", timing, faults or FaultInjection()), port=0,
                                   time_scale=time_scale).start()
         self.plc = PlcClient(spec, SimBackend(port=self.cell.port))
         self.plc.connect()
@@ -51,8 +52,9 @@ class Demo:
         corners = list(self.lab.corners.values())
         poses = {n: (p.x, p.y, p.yaw) for n, p in self.lab.poses.items()}
         self.events: list[str] = []
+        self.tilt = InProcessTilt()
         self.machine = JobMachine(self.nav, self.plc, LoopRouter(corners), poses, Timeouts(), Policy(),
-                                  on_event=self._record)
+                                  on_event=self._record, tilt=self.tilt)
 
     def now(self) -> float:
         return self.cell.sim_time()
@@ -71,6 +73,7 @@ class Demo:
         while self.now() < t_end:
             now = self.now()
             self.nav.update(now)
+            self.tilt.update(now, moving=self.nav.status().value == "running")
             self.machine.tick(now)
             worker(self.machine)
             if until(self.machine):
@@ -117,7 +120,7 @@ def scenario(name: str) -> bool:
             elif m.step is Step.AWAIT_RETURN_CONFIRM:
                 m.confirm_return(m.job.job_id, 1)
         ok = d.run(_done, worker)
-        ok &= any("return_confirmed" in e for e in d.events)
+        ok &= any("return_dumped" in e for e in d.events)          # tray tilted into the return bin
     elif name == "shortfall":
         d = Demo(name, faults=FaultInjection(lost_part=2))
         d.machine.submit(_order(4, "station_b", [("BRG-6204", 1, 2), ("NUT-M8", 2, 1)]))

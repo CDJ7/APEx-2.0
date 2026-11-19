@@ -83,7 +83,7 @@ troubleshooting. The sensor feed is independent of the job link and needs no orc
 | **Dashboard** | KPIs (open orders, robot step + battery, cell mode, open discrepancies), live lab map, **Action required** (everything the job is waiting on a person for, with the buttons), activity feed, low stock |
 | **Orders** | *New order*: pick parts (only parts with a PLC part code - i.e. stored in the FlexBase), quantities, destination, priority; stock is reserved at once. *Orders & jobs*: every order with status, job id, lines (ordered / not loaded / OK / damaged / missing) and the full job timeline from the orchestrator; approve / cancel |
 | **Receiving** | The worker's condition report at the station: OK + damaged + missing must equal what was **loaded** for each line. Confirming sends the receipt to the orchestrator (the robot may leave) and then books it. A second confirmation asks that hands are out of the bin (RA-10) |
-| **Robot & Cell** | Live map, job step with chute count, queue and fault text, **STOP / Reset / Resume**, TurtleBot battery / dock / pose, the read-only FlexBase + KUKA summary, simulation panel (built-in simulation only) |
+| **Robot & Cell** | Live map, job step with chute count, queue and fault text, **STOP / Reset / Resume**, TurtleBot battery / dock / pose, **return-tray state + Tray flat button**, the read-only FlexBase + KUKA summary, simulation panel (built-in simulation only: cell faults, tray jam, corridor barriers) |
 | **Sensors** | Read-only live view of the real TurtleBot (`--sensors ros`): OAK-D RGB preview and a top-down lidar plot (front up, range rings), with rate, age, **clock offset** (flags a wrong robot clock), point count and nearest obstacle. **Start lidar / Start camera** buttons (the robot stops both on the dock); nothing here moves the robot |
 | **Inventory** | Parts master data: slot, **PLC part code** (selects the KRL pick program; 0 = not in the cell), on hand, quarantine, reorder threshold; add / edit / audited stock adjustment / delete; CSV import & export |
 | **Quarantine** | Discrepancies - *Damaged*, *Missing* (at delivery), *NotLoaded* (chute short count), *ReturnMismatch* - resolved with a note; not-loaded / missing parts that turn up can be restocked. Quarantine stock (damaged units, never restocked) with disposal |
@@ -114,7 +114,8 @@ section 5):
 | `load_complete` / operator *send* | order → InTransit; not-loaded units → *NotLoaded* discrepancies |
 | robot waiting for the receipt (`AWAIT_RECEIPT`) | order → Delivered; **Action required: receipt** |
 | receipt | damaged → *Damaged* (return pending), missing → *Missing*; order → Closed |
-| robot at the return pose | **Action required: count the return bin**; damaged units → **quarantine**, shortfall → *ReturnMismatch* |
+| `return_dumped` - the robot's tray tilted the damaged parts into the return bin | damaged units → **quarantine** automatically ("count not verified"). With `return_mode: manual` instead: **Action required: count the return bin**, shortfall → *ReturnMismatch* |
+| tray fault (`TRAY_NOT_FLAT`, `TILT_FAILED`, ...) | **Action required: Tray flat**, then Reset, then Resume |
 | cancel before loading | reservation released |
 | cancel at a shortfall | counted units back to stock, uncounted → *NotLoaded* |
 | `fault` | error toast, order shows the fault; **Action required: Reset**, then **Resume** |
@@ -156,10 +157,10 @@ logged with the source IP and every change is audited as `rest:<ip>`.
 | `GET/POST /api/orders`, `GET /api/orders/{id}` | list / create / read orders |
 | `POST /api/orders/{id}/approve`, `/cancel` | order actions |
 | `POST /api/orders/{id}/receive` | receipt `{"lines": [{"line_id", "ok", "damaged", "missing", "notes"}], "receiver"}` |
-| `POST /api/orders/{id}/return` | return-bin count `{"count": n}` |
+| `POST /api/orders/{id}/return` | return-bin count `{"count": n}` (only with `return_mode: manual`) |
 | `POST /api/orders/{id}/shortfall` | `{"action": "send" \| "cancel"}` |
 | `GET /api/discrepancies`, `GET /api/discrepancies.csv`, `POST /api/discrepancies/{id}/resolve` | discrepancies |
-| `POST /api/operator/{stop\|reset\|resume}` | operator controls |
+| `POST /api/operator/{stop\|reset\|resume\|tray_home}` | operator controls |
 
 Example:
 

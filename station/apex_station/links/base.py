@@ -20,7 +20,7 @@ Status snapshot schema::
     {"mode": "sim" | "ros", "connected": bool,
      "job":   {"step", "since_s", "job_id", "destination", "expected", "counted", "queue",
                "fault_code", "fault_text", "route", "route_xy", "blocked_xy", "not_loaded"},
-     "robot": {"x", "y", "yaw", "battery", "docked"},
+     "robot": {"x", "y", "yaw", "battery", "docked", "tray", "tray_fault"},    # tray = tilt return tray state
      "cell":  {"connected", "backend", "mode", "mode_name", "safety_ok", "safety_simulated",
                "transfer_mode", "chute_count", "load_complete", "job_fault", "fault_code",
                "fault_text", "stack": {"red", "amber", "green"}},
@@ -38,7 +38,7 @@ StatusCallback = Callable[[dict[str, Any]], None]
 
 CELL_MODES = {0: "OFF", 1: "MANUAL", 2: "AUTO", 3: "FAULT"}
 KUKA_MODES = {1: "T1", 2: "T2", 3: "AUT", 4: "AUT EXT"}
-TRANSFER_MODES = {1: "A pusher", 2: "B gravity chute", 3: "C tilt tray"}
+TRANSFER_MODES = {1: "A pusher", 2: "B conveyor + chute", 3: "C tilt tray", 4: "D KUKA -> chute -> funnel"}
 
 
 class LinkError(RuntimeError):
@@ -76,7 +76,7 @@ class JobLink:
         raise NotImplementedError
 
     def operator(self, action: str, who: str, job_id: int = 0) -> None:
-        """``stop`` | ``reset`` | ``resume`` | ``cancel`` (with job_id)."""
+        """``stop`` | ``reset`` | ``resume`` | ``cancel`` (with job_id) | ``tray_home``."""
         raise NotImplementedError
 
 
@@ -86,7 +86,7 @@ def empty_status(mode: str) -> dict[str, Any]:
         "job": {"step": "OFFLINE", "since_s": 0.0, "job_id": 0, "destination": "", "expected": 0, "counted": 0,
                 "queue": [], "fault_code": "", "fault_text": "", "route": "", "route_xy": [], "blocked_xy": [],
                 "not_loaded": []},
-        "robot": {"x": 0.0, "y": 0.0, "yaw": 0.0, "battery": 0.0, "docked": False},
+        "robot": {"x": 0.0, "y": 0.0, "yaw": 0.0, "battery": 0.0, "docked": False, "tray": "", "tray_fault": ""},
         "cell": {"connected": False, "backend": "", "mode": 0, "mode_name": "OFF", "safety_ok": False,
                  "safety_simulated": False, "transfer_mode": 0, "chute_count": 0, "load_complete": False,
                  "job_fault": False, "fault_code": 0, "fault_text": "", "stack": {"red": False, "amber": False,

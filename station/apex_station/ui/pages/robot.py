@@ -30,7 +30,9 @@ STEP_TEXT = {
     "WAIT_IN_POSITION": "Waiting for the PLC to confirm the robot in position",
     "LOADING": "Loading - KUKA picking, parts sliding down the chute", "LOAD_SHORTFALL": "Load shortfall - decision needed",
     "NAV_TO_STATION": "Delivering", "AWAIT_RECEIPT": "Waiting for the receipt at the station",
-    "NAV_TO_RETURN": "Bringing damaged parts back", "AWAIT_RETURN_CONFIRM": "Waiting for the return bin to be emptied",
+    "NAV_TO_RETURN": "Bringing damaged parts to the return bin",
+    "RETURN_DUMP": "Tilting the tray - damaged parts slide into the return bin",
+    "AWAIT_RETURN_CONFIRM": "Waiting for the return bin to be emptied",
     "NAV_TO_DOCK": "Returning to the dock", "DOCKING": "Docking", "FAULT": "FAULT - stopped",
     "RESUME_WAIT": "Fault cleared - waiting for Resume", "OFFLINE": "Orchestrator offline", "STARTING": "Starting",
 }
@@ -116,9 +118,23 @@ class RobotCellPage(Page):
         self.batt.setFormat("%p %")
         self.l_dock = QLabel("-")
         self.l_pose = QLabel("-")
-        for name, w in (("Battery", self.batt), ("Dock", self.l_dock), ("Pose (map)", self.l_pose)):
+        self.l_tray = Chip("")
+        self.l_tray_fault = QLabel("")
+        self.l_tray_fault.setWordWrap(True)
+        self.l_tray_fault.setStyleSheet(f"color: {theme.BAD};")
+        for name, w in (("Battery", self.batt), ("Dock", self.l_dock), ("Pose (map)", self.l_pose),
+                        ("Return tray", self.l_tray)):
             rf.addRow(muted(name), w)
         rcard.body.addLayout(rf)
+        rcard.body.addWidget(self.l_tray_fault)
+        self.btn_tray = button("Tray flat (home)", slot=lambda: self.operator("tray_home"),
+                               tip="Drive the tilt tray back to flat after a tray fault. The robot must be parked "
+                                   "and hands clear of the tray.")
+        tray_note = muted("The robot never drives unless the tray is flat; the tray only tilts when the robot "
+                          "is still.")
+        tray_note.setWordWrap(True)
+        rcard.body.addWidget(tray_note)
+        rcard.body.addLayout(hbox(None, self.btn_tray))
         col.addWidget(rcard)
 
         # ---- cell (read-only)
@@ -166,7 +182,7 @@ class RobotCellPage(Page):
     def _sim_panel(self) -> Card:
         c = Card("Simulation tests (built-in simulation only)")
         self.f_kind = QComboBox()
-        self.f_kind.addItems(["lost_part", "pick_fail_part", "no_ack", "agv_not_detected"])
+        self.f_kind.addItems(["lost_part", "pick_fail_part", "no_ack", "agv_not_detected", "tray_jam"])
         self.f_unit = QSpinBox()
         self.f_unit.setRange(1, 20)
         self.f_unit.setPrefix("unit ")
@@ -181,13 +197,13 @@ class RobotCellPage(Page):
 
     def _inject(self) -> None:
         kind = self.f_kind.currentText()
-        value = True if kind in ("no_ack", "agv_not_detected") else self.f_unit.value()
+        value = True if kind in ("no_ack", "agv_not_detected", "tray_jam") else self.f_unit.value()
         self.ctx.core.link.inject_fault(kind, value)
         self.ctx.toast("warning", f"SIM: {kind} = {value}")
 
     def _clear_faults(self) -> None:
         self.ctx.core.link.clear_faults()
-        self.ctx.toast("info", "SIM: cell faults cleared")
+        self.ctx.toast("info", "SIM: cell and tray faults cleared")
 
     def _obstacles(self) -> None:
         names = [n for n, cb in (("barrier_north", self.ob_n), ("barrier_south", self.ob_s)) if cb.isChecked()]
@@ -230,6 +246,11 @@ class RobotCellPage(Page):
         self.batt.setStyleSheet(f"QProgressBar::chunk {{ background: "
                                 f"{theme.BAD if b < 30 else theme.WARN if b < 40 else theme.OK}; }}")
         self.l_dock.setText("docked (charging)" if robot.get("docked") else "undocked")
+        tray = robot.get("tray") or "-"
+        self.l_tray.set(tray, {"FLAT": theme.OK, "FAULT": theme.BAD, "UNKNOWN": theme.WARN}.get(tray, theme.ACCENT))
+        self.l_tray_fault.setText(robot.get("tray_fault") or "")
+        self.btn_tray.setEnabled(tray in ("FAULT", "UNKNOWN") or job.get("fault_code") in ("TRAY_NOT_FLAT",
+                                                                                          "TILT_FAILED"))
         self.l_pose.setText(f"x {robot.get('x', 0):.2f}  y {robot.get('y', 0):.2f}  "
                             f"θ {math.degrees(robot.get('yaw', 0)):.0f}°")
 
@@ -240,7 +261,7 @@ class RobotCellPage(Page):
         self.l_kuka.setText(f"{arm.get('mode_name') or '-'} · " + ("fault" if arm.get("fault") else
                             "busy" if arm.get("busy") else "ready" if arm.get("ready") else "not ready")
                             + (f" · program {arm['program_no']}" if arm.get("program_no") else ""))
-        self.l_xfer.setText({1: "A pusher", 2: "B gravity chute", 3: "C tilt tray"}.get(cell.get("transfer_mode"), "-")
+        self.l_xfer.setText({1: "A pusher", 2: "B conveyor + chute", 3: "C tilt tray", 4: "D KUKA → chute → funnel"}.get(cell.get("transfer_mode"), "-")
                             + f" · chute count {cell.get('chute_count', 0)}")
         self.l_safety.setText(("OK" if cell.get("safety_ok") else "NOT OK") +
                               (" (simulated)" if cell.get("safety_simulated") else ""))

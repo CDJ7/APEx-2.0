@@ -12,12 +12,14 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/JobEvent.msg"
   "msg/CellStatus.msg"
   "msg/ArmStatus.msg"
+  "msg/TiltState.msg"
   "srv/SubmitJob.srv"
   "srv/ConfirmReceipt.srv"
   "srv/ConfirmReturn.srv"
   "srv/ResolveShortfall.srv"
   "srv/Operator.srv"
   "srv/WriteTag.srv"
+  "srv/TiltCommand.srv"
   DEPENDENCIES builtin_interfaces
 )
 

@@ -91,12 +91,15 @@ class LabModel:
         poses = {n: Pose2D(v[0], v[1], math.radians(v[2])) for n, v in raw["poses"].items()}
         corners = {n: (float(v[0]), float(v[1])) for n, v in raw["loop"]["corners"].items()}
         solids = [Box("flexbase", 0.0, 0.0, fb["width"], fb["depth"], fb["height"])]
-        cv = raw["conveyor"]
-        solids.append(Box("conveyor", (cv["x_start"] + cv["x_end"]) / 2, 0.0, cv["x_end"] - cv["x_start"],
-                          cv["width"], cv["top_height"]))
-        ts = raw["transfer_station"]
-        solids.append(Box("transfer_station", (ts["x_min"] + ts["x_max"]) / 2, (ts["y_min"] + ts["y_max"]) / 2,
-                          ts["x_max"] - ts["x_min"], ts["y_max"] - ts["y_min"], ts["height"]))
+        if "conveyor" in raw:                  # transfer modes A/B only (not in the chosen direct-chute design)
+            cv = raw["conveyor"]
+            solids.append(Box("conveyor", (cv["x_start"] + cv["x_end"]) / 2, 0.0, cv["x_end"] - cv["x_start"],
+                              cv["width"], cv["top_height"]))
+        for key in ("transfer_station", "chute_support", "return_bin"):
+            if key in raw:
+                r = raw[key]
+                solids.append(Box(key, (r["x_min"] + r["x_max"]) / 2, (r["y_min"] + r["y_max"]) / 2,
+                                  r["x_max"] - r["x_min"], r["y_max"] - r["y_min"], r["height"]))
         tx, ty, tz = raw["stations"]["table_size"]
         for name, sign in (("station_a_table", 1), ("station_b_table", -1)):
             p = poses["station_a" if sign > 0 else "station_b"]

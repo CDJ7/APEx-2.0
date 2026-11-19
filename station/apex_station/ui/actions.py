@@ -80,7 +80,12 @@ class ActionPanel(Card):
         if step == "AWAIT_RETURN_CONFIRM" and oid:
             self._row(theme.WARN, f"Order #{oid}: robot at the return pose - empty the return bin and count the "
                                   "damaged parts.", button("Enter count…", "primary", lambda: self._return(oid)))
-        if step == "FAULT":
+        if step == "FAULT" and job.get("fault_code") in ("TRAY_NOT_FLAT", "TILT_FAILED", "TILT_TIMEOUT"):
+            self._row(theme.BAD, f"FAULT {job.get('fault_code')}: {job.get('fault_text')}. Clear the tray, keep "
+                                 "hands away, home it flat, then Reset.",
+                      button("Tray flat", slot=lambda: self._operator("tray_home")),
+                      button("Reset", "primary", lambda: self._operator("reset")))
+        elif step == "FAULT":
             self._row(theme.BAD, f"FAULT {job.get('fault_code')}: {job.get('fault_text')}. Fix the cause, then Reset.",
                       button("Reset", "primary", lambda: self._operator("reset")))
         if step == "RESUME_WAIT":

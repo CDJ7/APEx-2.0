@@ -75,3 +75,29 @@ def test_cell_rejects_writes_outside_station_block(spec):
         cell.station_write("APEX_ToStation.Load_Complete", True)
     with pytest.raises(PermissionError):
         cell.station_write("APEX_ToStation.Safety_OK", False)
+
+
+def test_mode_d_skips_the_conveyor(spec):
+    cell = CellModel(spec)                                   # default is the chosen design: D
+    assert cell.transfer_mode == "D" and cell.get("Transfer_Mode") == 4
+    c = PlcClient(spec, InProcessBackend(cell))
+    c.write("Job_ID", 1)
+    c.write("Job_LineCount", 1)
+    c.write("Job_PartCodes", [10])
+    c.write("Job_PartQty", [2])
+    c.write("Job_Request", True)
+    t, conveyor_ever_on = 0.0, False
+    for _ in range(400):
+        t += 0.1
+        c.write("Station_Heartbeat", int(t * 10))          # the station is alive
+        cell.tick(t)
+        if cell.get("Job_Ack") == 1 and not cell.get("AGV_AtTransfer"):
+            c.write("Job_Request", False)
+            c.write("AGV_AtTransfer", True)
+        if cell.get("AGV_InPosition_Confirmed") and not cell.get("Load_Complete"):
+            c.write("Load_Request", True)
+        conveyor_ever_on |= bool(cell.get("Conveyor_Run")) or bool(cell.get("StopStation_Release"))
+        if cell.get("Load_Complete"):
+            break
+    assert cell.get("Load_Complete") and cell.get("Chute_PartCount") == 2
+    assert not conveyor_ever_on

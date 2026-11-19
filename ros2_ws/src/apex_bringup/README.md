@@ -6,8 +6,8 @@ Lab model, generated simulation assets, configuration and launch files for APEx 
 
 Every number about the lab lives in `config/lab.yaml`: FlexBase 6 ft footprint
 (72" × 40" = 1.829 m × 1.016 m), the guarded island around it, 5 ft (1.524 m) loop corridors,
-the Quickdraw conveyor, the transfer station, the **gravity chute** (transfer mode B - the
-team's choice), the station tables, the TurtleBot 4 footprint, the named poses and the loop
+the **gravity chute** and **funnel** (transfer mode D - the KUKA drops parts straight in), the
+chute support, the **return bin**, the station tables, the TurtleBot 4 footprint, the named poses and the loop
 corners. `apex_bringup/lab_model.py` loads it; everything else reads that model:
 
 ```
@@ -31,10 +31,10 @@ python3 -m pytest ros2_ws -q                                       # test_lab_ge
 
 | Pose | x | y | yaw | Purpose |
 |---|---|---|---|---|
-| `transfer` | 2.14 | 0.00 | 90 | Bin under the gravity-chute exit, **outside the guarding**. Robot body clears the transfer station by ~9 cm. |
-| `transfer_staging` | 2.14 | −0.60 | 90 | Nav2 route ends here; the precise final approach starts here. |
-| `return_drop` | 2.14 | 0.75 | 90 | Operator empties the return bin (damaged-part handling is deferred - see docs/ROADMAP.md). |
-| `dock` | 3.10 | −1.20 | 0 | Charging dock on the east wall. |
+| `transfer` | 1.65 | 0.00 | 90 | Tray under the funnel at the gravity-chute exit, **outside the guarding**. Robot body clears the chute support by ~9 cm. |
+| `transfer_staging` | 1.65 | −0.60 | 90 | Nav2 route ends here; the precise final approach starts here. |
+| `return_drop` | 1.65 | 0.62 | 90 | Beside the return bin: the robot tilts its tray to the left and the damaged parts slide in. |
+| `dock` | 2.60 | −1.20 | 0 | Charging dock on the east wall. |
 | `station_a` | 0.00 | 1.75 | 180 | Delivery station A (north corridor). |
 | `station_b` | 0.00 | −1.75 | 0 | Delivery station B (south corridor). |
 
@@ -44,7 +44,7 @@ All poses are `[TBD]` until the lab is measured; change them in one place (`lab.
 
 | World | Contents | Used for |
 |---|---|---|
-| `apex_lab` | room, FlexBase, conveyor, transfer station, chute, station tables | normal runs, demos (a) and (c) |
+| `apex_lab` | room, FlexBase, gravity chute + funnel, chute support, return bin, station tables | normal runs, demos (a) and (c) |
 | `apex_lab_obstacles` | + a small box in the north corridor (passable) | Nav2 local avoidance |
 | `apex_lab_blocked_north` | + a barrier across the north corridor | demo (b): reroute the other way |
 | `apex_lab_blocked_south` | + a barrier across the south corridor | reroute in the other direction |
@@ -68,8 +68,9 @@ Every world is named `apex_lab` inside the SDF (the ROS-Gazebo bridge topics use
 | Launch | What it starts |
 |---|---|
 | `sim.launch.py world:=<world> [rviz:=true] [headless:=true]` | Gazebo Harmonic with our world, TurtleBot 4 spawned **docked** at the `dock` pose, AMCL on `maps/apex_lab.yaml`, Nav2 with merged params |
-| `apex.launch.py [network:=school\|lab] [nav_backend:=nav2\|kinematic] [cell_sim:=true\|false]` | apex_cell_sim (sim backend), apex_plc_bridge, apex_orchestrator |
+| `apex.launch.py [network:=school\|lab] [nav_backend:=nav2\|kinematic] [cell_sim:=true\|false] [tilt:=sim\|robot\|none]` | apex_cell_sim (sim backend), apex_plc_bridge, apex_orchestrator, and a simulated `tilt_platform` (tilt:=sim) |
 | `demo.launch.py scenario:=full\|reroute\|return [gazebo:=false]` | sim + apex stack + the demo client that plays the station worker; `reroute` picks the blocked-north world automatically |
+| `robot.launch.py map:=<real map> [cell:=sim\|plc] [tilt:=robot\|sim\|none]` | **Real TurtleBot** on the lab router: localization + Nav2 on the laptop + APEx stack (network lab). Untested - see docs/TURTLEBOT_STATUS.md |
 
 `sim.launch.py` starts Gazebo itself instead of `turtlebot4_gz.launch.py` because that file
 overwrites `GZ_SIM_RESOURCE_PATH` (so it cannot find our worlds) and uses its `world`

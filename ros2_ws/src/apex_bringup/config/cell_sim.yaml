@@ -6,15 +6,15 @@ host: 127.0.0.1
 port: 44818                 # EtherNet/IP's port number, only to look familiar - this is plain TCP JSON
 scan_hz: 20
 time_scale: 1.0             # >1 runs the cell faster than real time (headless demos use 10)
-transfer_mode: B            # A pusher+chute | B gravity chute (chosen) | C lift-and-locate+tilt tray
+transfer_mode: D            # D KUKA -> gravity chute -> funnel (CHOSEN) | A pusher | B conveyor+chute | C tilt tray
 
 timing:                     # seconds (simulated)
   ack_delay: 0.5
   in_position_delay: 1.0
-  pick: 6.0                 # KUKA shelf -> conveyor, one part        [TBD measured]
-  convey: 4.0               # conveyor to the stop station            [TBD measured]
-  release: 0.5              # stop station opens (B)
-  drop: 1.0                 # part slides down the chute
+  pick: 6.0                 # KUKA: shelf -> drop into the chute inlet, one part  [TBD measured]
+  convey: 4.0               # A/B only (conveyor) - unused in mode D
+  release: 0.5              # A/B only (stop station / pusher) - unused in mode D
+  drop: 1.0                 # part slides down the chute + funnel into the tray   [TBD measured]
   heartbeat: 0.5
   station_hb_timeout: 2.0
 
@@ -27,4 +27,4 @@ faults:                     # fault injection for tests/demos (all off = normal 
 gazebo:
   spawn_parts: false        # true when running with the Gazebo world (gz CLI must be on PATH)
   world: apex_lab
-  bin_xyz: [2.14, 0.0, 0.62]
+  bin_xyz: [1.65, 0.0, 0.47]          # spawn just below the funnel outlet

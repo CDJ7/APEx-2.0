@@ -20,7 +20,8 @@ EVENT_TEXT = {
     "part_counted": "part counted into the bin", "load_complete": "loaded", "load_shortfall": "LOAD SHORTFALL",
     "shortfall_accepted": "sent with shortfall", "route": "route", "direction_blocked": "corridor blocked",
     "rerouting": "rerouting", "arrived": "arrived", "receipt_confirmed": "receipt confirmed",
-    "return_confirmed": "return bin emptied", "job_done": "done", "docked": "docked", "fault": "FAULT",
+    "return_confirmed": "return bin emptied", "return_dump_started": "tilting the tray",
+    "return_dumped": "damaged parts slid into the return bin", "tray_home": "tray homed", "job_done": "done", "docked": "docked", "fault": "FAULT",
     "fault_cleared": "fault cleared", "resumed": "resumed", "job_cancelled": "cancelled",
 }
 EVENT_COLOR = {"fault": theme.BAD, "load_shortfall": theme.BAD, "direction_blocked": theme.WARN,

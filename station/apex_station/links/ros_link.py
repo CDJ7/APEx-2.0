@@ -108,7 +108,8 @@ class RosJobLink(JobLink):
                 "fault_code": m.fault_code, "fault_text": m.fault_text, "route": m.route_direction,
                 "route_xy": _pairs(list(m.route_xy)), "blocked_xy": _pairs(list(m.blocked_xy)), "not_loaded": []}
             self._status["robot"] = {"x": float(m.robot_x), "y": float(m.robot_y), "yaw": float(m.robot_yaw),
-                                     "battery": float(m.battery_pct), "docked": bool(m.docked)}
+                                     "battery": float(m.battery_pct), "docked": bool(m.docked),
+                                     "tray": m.tilt_state, "tray_fault": ""}
         self._on_status(self.status())
 
     def _on_job_event(self, m: JobEvent) -> None:

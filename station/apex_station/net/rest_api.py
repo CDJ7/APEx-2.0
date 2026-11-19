@@ -86,7 +86,7 @@ class ResolveIn(BaseModel):
     restock: bool = False
 
 
-OperatorAction = Literal["stop", "reset", "resume"]
+OperatorAction = Literal["stop", "reset", "resume", "tray_home"]
 
 
 # ------------------------------------------------------------------ app

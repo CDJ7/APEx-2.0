@@ -10,16 +10,16 @@ risk assessment are marked **⚠ RA** and collected in
 
 A user orders parts at the **main station** (or from the workstation laptop).
 The **KUKA KR 6 R900-2** inside the **FlexBase** cell picks each ordered part
-individually and places it on the **Quickdraw conveyor**. The conveyor carries
-it out of the guarded cell to a **transfer station**, where a transfer
-mechanism drops it through a padded **chute** into the delivery bin of a
-**TurtleBot 4** parked underneath. A photoeye counts every part that lands.
-The TurtleBot drives around the loop corridor to one of two **delivery
-stations**, the worker confirms each line as OK / damaged / missing, puts
-damaged parts in the separate **return bin**, and the TurtleBot brings them
-back to the FlexBase, where an operator empties the return bin and confirms
-the count. Inventory, quarantine (damaged) and discrepancies (missing, not
-loaded) are updated at every step.
+individually and **drops it into a gravity chute** that leads out through the
+guarding. A **funnel** at the chute exit puts the part straight onto a fixed
+spot on the tray of a **TurtleBot 4** parked underneath, and a photoeye at the
+funnel outlet counts every part. The TurtleBot drives around the loop corridor
+to one of two **delivery stations**, and the worker confirms each line as
+OK / damaged / missing. The damaged parts stay on the tray; the TurtleBot
+carries them to the **return bin next to the FlexBase**, where a motor tilts
+its tray into a ramp and the parts slide into the bin. Inventory, quarantine
+(damaged) and discrepancies (missing, not loaded) are updated at every step.
+Design details: [`TRANSFER_AND_RETURN.md`](TRANSFER_AND_RETURN.md).
 
 **The TurtleBot never enters the FlexBase guarding**, and the arm's danger
 zone and the robot's path never overlap.
@@ -40,19 +40,19 @@ flowchart LR
         subgraph TB["TurtleBot 4 (standard)"]
             NAV["Nav2 + AMCL on saved map<br/>named poses · docking"]
             C3["Create 3 base<br/>motors · hazards · dock · battery"]
-            BIN["Top plate: delivery bin(s)<br/>+ separate return bin"]
+            BIN["Top plate: tray with funnel nest<br/>+ tilt motor (apex_tilt)"]
         end
         subgraph CELL["FlexBase 6 ft cell (guarded)"]
-            PLC["Compact GuardLogix 5380<br/>standard task: handshake, conveyor,<br/>transfer, KUKA program select<br/>safety task: PLd circuit (read-only to us)"]
+            PLC["Compact GuardLogix 5380<br/>standard task: handshake, part count,<br/>KUKA program select<br/>safety task: PLd circuit (read-only to us)"]
             KRC["KR C4 compact<br/>AUT EXT · KRL programs"]
             ARM["KR 6 R900-2 + gripper<br/>(picks individual parts)"]
-            CONV["Quickdraw conveyor"]
+            INLET["Chute inlet<br/>(KUKA drops parts in)"]
         end
-        subgraph XFER["Transfer station (outside guarding)"]
-            STOP["Stop station"]
-            PUSH["Stop-station gate<br/>transfer_mode = B (chosen)"]
-            CHUTE["Gravity chute (padded)"]
-            PE["Part-present photoeye"]
+        subgraph XFER["Outside the guarding"]
+            CHUTE["Gravity chute through the guard<br/>transfer_mode = D (chosen)"]
+            FUNNEL["Funnel"]
+            PE["Funnel-outlet photoeye"]
+            RBIN["Return bin<br/>(tray tilts parts in)"]
         end
     end
     WV["Service laptop - WorkVisual<br/>(direct to KR C4 X69 / KSI)"]
@@ -70,11 +70,9 @@ flowchart LR
     PLC -- "EtherNet/IP I/O (non-safety):<br/>program number, start, status" --> KRC
     PLC -. "CIP Safety over EtherNet/IP (X66)<br/>OR X11 hardwired - never both" .- KRC
     KRC --- ARM
-    PLC --- CONV
-    PLC --- STOP
-    PLC --- PUSH
+    ARM --> INLET --> CHUTE --> FUNNEL --> BIN
     PE --> PLC
-    CONV --> STOP --> PUSH --> CHUTE --> BIN
+    BIN -. "damaged parts" .-> RBIN
     WV -.-> KRC
     STUDIO -.-> PLC
     IGN -- "OPC UA / Logix driver" --> PLC
@@ -117,7 +115,7 @@ get two competing cell screens.
 ### 3.1a FlexBase HMI: Ignition
 
 - Ignition (Inductive Automation) is the operator HMI for the cell: cell mode,
-  conveyor, stop station, chute count, KUKA mode/ready/busy/fault/program,
+  chute count, KUKA mode/ready/busy/fault/program,
   stack light, alarms, and the **read-only** safety status the PLC exposes.
 - It connects to the Compact GuardLogix with Ignition's Allen-Bradley Logix
   driver (or OPC UA) on the **lab network only**.
@@ -194,14 +192,14 @@ routines come in the Integration Documentation stage
 | Station → PLC | `Job_PartCodes[]`, `Job_PartQty[]`, `Job_LineCount` | parts to pick (codes map to taught pick positions) |
 | Station → PLC | `AGV_AtTransfer` | TurtleBot reports it is parked at the transfer pose |
 | Station → PLC | `Load_Request` | start loading the parts for `Job_ID` |
-| Station → PLC | `Return_Request` | TurtleBot is at the return-unload pose (operator task) |
+| Station → PLC | `Return_Request` | TurtleBot is at the return pose tilting its tray into the return bin |
 | Station → PLC | `Job_Cancel`, `Fault_Reset_Request` | operator actions from the GUI (PLC decides) |
 | PLC → Station | `PLC_Heartbeat`, `Cell_Mode` | heartbeat; cell AUTO / MANUAL / FAULT |
 | PLC → Station | `Job_Ack` | job accepted (echoes `Job_ID`) |
 | PLC → Station | `Cell_ReadyForAGV` | transfer station clear and ready for a robot |
-| PLC → Station | `AGV_InPosition_Confirmed` | PLC confirms the robot is in position (photoeye under chute) |
-| PLC → Station | `Conveyor_Run`, `StopStation_Release`, `Pusher_Extend` | conveyor and transfer state (read-only to us) |
-| PLC → Station | `Chute_PartCount` | parts counted by the photoeye for this job |
+| PLC → Station | `AGV_InPosition_Confirmed` | PLC confirms the robot is in position (its own sensor under the funnel) |
+| PLC → Station | `Conveyor_Run`, `StopStation_Release`, `Pusher_Extend` | transfer modes A/B only - unused in mode D (direct chute) |
+| PLC → Station | `Chute_PartCount` | parts counted by the funnel-outlet photoeye for this job |
 | PLC → Station | `Transfer_Complete`, `Transfer_Fault` | per-part transfer result |
 | PLC → Station | `Load_Complete` | all parts of the job transferred |
 | PLC → Station | `Job_Fault`, `Fault_Code` | cell fault (timeout, count mismatch, pick failure, ...) |
@@ -224,8 +222,8 @@ routines come in the Integration Documentation stage
    **X66 (KUKA Line Interface, KLI)**. This needs the KUKA.EtherNet/IP option
    on the controller **[CONFIRM installed]**, configured in WorkVisual over
    **X69 (KSI)** from a service laptop.
-3. One KRL program per action, e.g. `PICK_PART(part_code)` places one part on
-   the conveyor and returns home. Pick positions are taught on the smartPAD
+3. One KRL program per action, e.g. `PICK_PART(part_code)` picks one part,
+   drops it into the chute inlet and returns home. Pick positions are taught on the smartPAD
    in **T1**. New or modified programs are always tested in **T1 (≤ 250 mm/s,
    velocity-monitored by the safety controller)** before AUT EXT.
 4. **Single point of control** (manual §5.8.9): the PLC and every remote tool
@@ -291,36 +289,40 @@ point of control* principle and needs its own risk assessment. **⚠ RA**
   **not a safety function**: the safety argument is that the arm's danger
   zone is fully enclosed by guarding. **⚠ RA**
 
-### 3.6 Transfer station (conveyor → TurtleBot)
+### 3.6 Transfer (KUKA → gravity chute → funnel → TurtleBot) and return (tilting tray)
 
-- **Chosen: transfer mode B - gravity chute** (team decision). The conveyor
-  carries one part at a time to a stop station at the end of the run-out; the
-  PLC opens the stop (`StopStation_Release`) and the part slides down a padded
-  gravity chute into the TurtleBot's bin, which is parked under the chute
-  exit outside the guarding.
-- `transfer_mode` stays configurable (`lab.yaml`, `cell_sim.yaml`): **A** stop
-  station + SMC pusher + chute; **B** gravity chute (chosen); **C**
-  lift-and-locate + tilting tray. All three share the same tag set.
-- Chute geometry (sim, `[TBD]` on the real cell): top at the conveyor height
-  (0.85 m), exit at 0.55 m above the floor, 0.28 m horizontal run, 0.20 m
-  wide. The exit must clear the TurtleBot (0.351 m) plus the bin, and the
-  drop into the bin must be short enough not to damage parts.
-- A **part-present photoeye** counts every part landing in the bin. The
+Full design: [`TRANSFER_AND_RETURN.md`](TRANSFER_AND_RETURN.md).
+
+- **Chosen 2026-11-19: transfer mode D - direct to the chute.** The KUKA drops
+  each part into the chute inlet inside the guarding; the chute crosses the
+  east guard panel; a funnel at the exit puts the part on the same spot of the
+  robot's tray at the `transfer` pose. **No conveyor.** (Modes A pusher,
+  B conveyor + chute and C tilt tray remain in the cell simulator.)
+- Chute geometry (sim, `[TBD]` on the real cell): inlet x 0.80 / z 1.10, exit
+  x 1.65 / z 0.62 (≈ 30°), 0.20 m wide; funnel 0.20 → 0.08 m, outlet 0.48 m
+  above the floor - clear of the TurtleBot (0.351 m) plus the tray.
+- **Damaged-part return:** the robot parks at `return_drop` beside the return
+  bin and a motor tilts its tray (≈ 35°) so the damaged parts slide in; two
+  limit switches, a microcontroller with its own stop logic, and the
+  `apex_tilt` node on the robot. The robot never drives unless the tray is
+  flat; the tray never tilts unless the robot is still.
+- A **photoeye at the funnel outlet** counts every part landing on the tray. The
   orchestrator compares the count with the order; a shortfall is a
   **"not loaded"** discrepancy, distinct from *missing at delivery*.
-- Chute and transfer station are **pinch-point and falling-part hazards**
-  for people. **⚠ RA**
+- The chute's guard opening, the funnel and the tilting tray are
+  **reach-in, falling-part and pinch-point hazards** for people. **⚠ RA-01, RA-18, RA-20, RA-21**
 - Details in `docs/TRANSFER_STATION.md` (Integration Documentation stage).
 
 ## 4. ROS 2 packages (built in the Simulation Bring-up stage)
 
 | Package | Contents |
 |---|---|
-| `apex_interfaces` | msgs: `OrderLine`, `LineReceipt`, `JobStatus`, `JobEvent`, `CellStatus`, `ArmStatus`; srvs: `SubmitJob`, `ConfirmReceipt`, `ConfirmReturn`, `ResolveShortfall`, `Operator` (stop/reset/resume/cancel), `WriteTag` (bridge only, allow-listed) |
+| `apex_interfaces` | msgs: `OrderLine`, `LineReceipt`, `JobStatus`, `JobEvent`, `CellStatus`, `ArmStatus`, `TiltState`; srvs: `SubmitJob`, `ConfirmReceipt`, `ConfirmReturn`, `ResolveShortfall`, `Operator` (stop/reset/resume/cancel/tray_home), `WriteTag` (bridge only, allow-listed), `TiltCommand` |
 | `apex_orchestrator` | job state machine node, loop router, pose/route YAML loader |
 | `apex_plc_bridge` | `pycomm3` tag client with write allow-list; a sim backend talking to `apex_cell_sim` |
-| `apex_cell_sim` | imitation GuardLogix + KUKA + conveyor + transfer (same tags, timing from YAML, fault injection), timed part spawn into the bin in Gazebo |
-| `apex_bringup` | launch files, Gazebo world (FlexBase 72 × 40 in, loop corridors, two stations, dock, conveyor, transfer station, chute, obstacle models), map, pose YAML, network profiles |
+| `apex_cell_sim` | imitation GuardLogix + KUKA + chute (transfer mode D; A/B/C kept) (same tags, timing from YAML, fault injection), timed part spawn into the bin in Gazebo |
+| `apex_tilt` | tilting return tray on the TurtleBot: controller with interlocks, `tilt_platform` node (runs on the robot), simulated + serial motor backends |
+| `apex_bringup` | launch files, Gazebo world (FlexBase 72 × 40 in, loop corridors, two stations, dock, chute + funnel, chute support, return bin, obstacle models), map, pose YAML, network profiles |
 
 ## 5. Data ownership and interfaces
 
@@ -328,7 +330,7 @@ point of control* principle and needs its own risk assessment. **⚠ RA**
 |---|---|---|
 | Inventory, orders, receiving, quarantine, discrepancies, audit | `StationCore` (SQLite) | read by GUI and REST |
 | Job runtime state, routing, timeouts | `apex_orchestrator` | publishes `JobStatus`; `StationCore` records job events |
-| Cell, conveyor, transfer, KUKA program select | GuardLogix | read and requested by `apex_plc_bridge` |
+| Cell, part count, KUKA program select | GuardLogix | read and requested by `apex_plc_bridge` |
 | Arm motion | KR C4 (KRL), commanded by the PLC only | — |
 | Robot motion | Nav2 on the TurtleBot, goals from the orchestrator | — |
 | Safety functions | GuardLogix safety task + KR C4 safety controller | **read-only** everywhere else |

@@ -22,7 +22,7 @@ from apex_plc_bridge.tags import TagSpec
 def stack(tmp_path):
     bus = ros_fakes.install()
     spec = TagSpec.load(config_file("plc_tags.yaml"))
-    cell = CellSimServer(CellModel(spec, "B", CellTiming(pick=2.0, convey=1.0)), port=0, time_scale=40.0).start()
+    cell = CellSimServer(CellModel(spec, "D", CellTiming(pick=2.0, convey=1.0)), port=0, time_scale=40.0).start()
     prof = yaml.safe_load(config_file("network_school.yaml").read_text())
     prof["plc"]["sim_port"] = cell.port
     (tmp_path / "net.yaml").write_text(yaml.safe_dump(prof))
@@ -30,10 +30,14 @@ def stack(tmp_path):
     ros_fakes.Node.PARAMS = {
         "apex_plc_bridge": {"network_profile": str(tmp_path / "net.yaml")},
         "apex_orchestrator": {"nav_backend": "kinematic"},
+        "tilt_platform": {"require_odom": False},          # the kinematic stand-in publishes no /odom
     }
     from apex_orchestrator.orchestrator_node import OrchestratorNode
     from apex_plc_bridge.bridge_node import PlcBridgeNode
+    from apex_tilt.tilt_node import TiltNode
+    tilt = TiltNode()
     bridge, orch = PlcBridgeNode(), OrchestratorNode()
+    orch.timers.extend(tilt.timers)                        # drive the tray node's timers with the orchestrator's
     yield bus, bridge, orch, cell
     bridge.client.close()
     cell.stop()
@@ -112,3 +116,25 @@ def test_operator_service_validates_action(stack):
     from apex_interfaces.srv import Operator
     assert not _call(bus, "/apex/operator", Operator.Request(action="explode")).ok
     assert not _call(bus, "/apex/operator", Operator.Request(action="resume")).ok   # nothing to resume
+
+
+def test_damaged_return_through_the_tilt_node(stack):
+    bus, bridge, orch, cell = stack
+    from apex_interfaces.msg import LineReceipt, OrderLine
+    from apex_interfaces.srv import ConfirmReceipt, Operator, SubmitJob
+    assert _spin([bridge, orch], lambda: orch._started, 30)
+    jid = _call(bus, "/apex/submit_job", SubmitJob.Request(
+        order_id=5, destination="station_b", lines=[OrderLine(part_number="P-1", part_code=10, quantity=2)])).job_id
+
+    def flow():
+        st = bus.published.get("/apex/job_status", [None])[-1]
+        if st is not None and st.step == "AWAIT_RECEIPT" and st.job_id == jid:
+            assert _call(bus, "/apex/confirm_receipt", ConfirmReceipt.Request(
+                job_id=jid, lines=[LineReceipt(ok=1, damaged=1, missing=0)])).ok
+        kinds = [e.kind for e in bus.published.get("/apex/job_events", [])]
+        return "return_dumped" in kinds and "docked" in kinds[kinds.index("return_dumped"):]
+    assert _spin([bridge, orch], flow)
+    states = {m.state for m in bus.published["/apex/tilt/state"]}
+    assert {"FLAT", "TILTING", "RAMP", "RETURNING"} <= states
+    assert bus.published["/apex/job_status"][-1].tilt_state == "FLAT"
+    assert _call(bus, "/apex/operator", Operator.Request(action="tray_home")).ok      # parked: homing allowed

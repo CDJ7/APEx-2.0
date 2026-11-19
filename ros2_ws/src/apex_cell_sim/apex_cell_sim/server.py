@@ -37,12 +37,12 @@ log = logging.getLogger("apex.cell_sim")
 def build_model(cfg: dict[str, Any], spec: TagSpec) -> CellModel:
     timing = CellTiming(**(cfg.get("timing") or {}))
     faults = FaultInjection(**(cfg.get("faults") or {}))
-    model = CellModel(spec, cfg.get("transfer_mode", "B"), timing, faults)
+    model = CellModel(spec, cfg.get("transfer_mode", "D"), timing, faults)
     gz = cfg.get("gazebo") or {}
     if gz.get("spawn_parts"):
         from apex_cell_sim.gz_spawn import PartSpawner
 
-        model.on_part_counted = PartSpawner(gz.get("world", "apex_lab"), tuple(gz.get("bin_xyz", [2.14, 0.0, 0.62])))
+        model.on_part_counted = PartSpawner(gz.get("world", "apex_lab"), tuple(gz.get("bin_xyz", [1.65, 0.0, 0.47])))
     return model
 
 

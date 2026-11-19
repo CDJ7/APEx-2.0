@@ -13,8 +13,8 @@ moves to the *Answered* table at the bottom.
 | Q-S2 | **Station PC.** Is it a dedicated Ubuntu 24.04 machine (or dual boot) that can run ROS 2 Jazzy + Gazebo? Studio 5000 and WorkVisual are Windows-only, so they would run on a separate Windows laptop. | Station PC = Ubuntu 24.04 + ROS 2 Jazzy; separate Windows laptop for Studio 5000 / WorkVisual. |
 | Q-S3 | **Who runs the Gazebo + Nav2 demos?** The build environment can install Gazebo Harmonic but not ROS 2 (its package server is blocked), so the worlds were validated in Gazebo and the logic headless; the full ROS run needs the team's Ubuntu 24.04 + Jazzy machine. Which machine, and who? | Station PC, following `docs/SIMULATION.md`. |
 | Q-S4 | **Parts to deliver:** how many part types, size and weight of each (heaviest?), how many parts per order, how they are stored in the cell (trays, fixtures, a parts rack?). Drives gripper choice, pick positions, conveyor pallet nests, bin size and the 9 kg payload budget. | Small parts ≤ 0.5 kg, ≤ 10 per order (placeholder). |
-| Q-S5 | ~~Transfer method~~ → answered A-7: **B, gravity chute**. Still open: real chute geometry (conveyor exit height, slope, exit height above the bin, padding). | Sim: top 0.85 m, exit 0.55 m, 0.28 m run, 0.20 m wide. |
-| Q-S6 | **Pallet or directly on the belt?** With the gravity chute the part has to leave the conveyor by itself at the end of the run, so it rides **directly on the belt** (or on a pallet that tips at the end). Does our Quickdraw run bare-belt? | **Proposal: bare belt**, stop station holds the part, releasing it lets it run off the end into the chute. **[CONFIRM]** |
+| Q-S5 | Real **chute + funnel geometry** (transfer mode D, A-14): where the chute can pass through the guarding, inlet height the KUKA can drop into, slope for the real parts (friction), funnel outlet size and height above the tray. | Sim: inlet x 0.80 / z 1.10, exit x 1.65 / z 0.62 (≈30°), funnel 0.20 → 0.08 m, outlet z 0.48. |
+| Q-S6 | ~~Pallet or belt~~ - no conveyor any more (A-14). | - |
 | Q-S7 | **Parking accuracy under the chute.** Is AMCL + Nav2 with a 6 cm goal tolerance good enough on the real floor, or do we add a fiducial (AprilTag on the transfer station, OAK-D) and opennav_docking for the last 0.6 m? | Try AMCL first; measure 20 parkings; fiducial if any is off by > 4 cm. |
 | Q-S8 | **Real cell timing** (pick, convey, release, drop per part) to replace the placeholders in `cell_sim.yaml`. | 6 s / 4 s / 0.5 s / 1 s. |
 
@@ -23,9 +23,9 @@ moves to the *Answered* table at the bottom.
 | ID | Question | Current assumption |
 |---|---|---|
 | Q-L1 | Room dimensions, door, columns. Does a 6.1 m × 4.7 m area fit? | Proposed footprint in `LAB_LAYOUT.md`. |
-| Q-L2 | FlexBase orientation and **which end the Quickdraw conveyor exits**, plus the conveyor height at the exit. | Conveyor exits the +x (east) end. Height unknown; it sets the chute slope. |
+| Q-L2 | FlexBase orientation and **which end panel the chute can pass through** (and the KUKA's drop height there). | Chute leaves the +x (east) end. |
 | Q-L3 | Operator side of the FlexBase; position of the start/stop/reset pushbutton box and the safety-gate **acknowledge button** (must be outside the guarding). | Operator at the east end, near the transfer station. |
-| Q-L4 | Where can the charging dock go (wall outlet)? | Outer wall of the east corridor, at (3.10, −1.20). |
+| Q-L4 | Where can the charging dock go (wall outlet)? | Outer wall of the east corridor, at (2.60, −1.20). |
 | Q-L5 | What do the delivery stations physically look like (table? shelf?), and where does the worker confirm receipt (station PC GUI, the workstation laptop, a tablet at each station)? | Workstation laptop via REST, or the main GUI. |
 
 ## FlexBase / PLC (Q-P)
@@ -45,7 +45,7 @@ moves to the *Answered* table at the bottom.
 | Q-K1 | **KSS version** and **installed options** (smartPAD: *Help → Info → Options*): KUKA.EtherNet/IP? CIP Safety? PROFIsafe? | KUKA.EtherNet/IP present. CIP Safety unknown. |
 | Q-K2 | Is the safety interface today **X11 discrete** or **X66 Ethernet safety**? (Never both.) | Recommend CIP Safety if installed, else X11 to GuardLogix safety I/O. |
 | Q-K3 | **Gripper:** model, actuation (pneumatic via the SMC valve bank? electric?), and whether it needs a part-present sensor. | Pneumatic gripper on the SMC valve bank; PLC controls it through the KRL handshake. |
-| Q-K4 | Where is the arm mounted inside the FlexBase, and can its **danger zone (workspace + stopping distance)** reach the conveyor exit opening? Do we need software workspace limits (SafeOperation) or mechanical limits? | Danger zone stays inside the guarding; the conveyor opening is too small for a person to reach through. **⚠ RA** |
+| Q-K4 | Where is the arm mounted inside the FlexBase, and can its **danger zone (workspace + stopping distance)** reach the chute's opening in the guarding, and does it reach the chute inlet? Do we need software workspace limits (SafeOperation) or mechanical limits? | Danger zone stays inside the guarding; the conveyor opening is too small for a person to reach through. **⚠ RA** |
 | Q-K5 | Is a smartPAD with a key switch available, and who on the team is trained to operate the KUKA (T1 teaching)? | — |
 
 ## TurtleBot 4 (Q-T)
@@ -70,7 +70,7 @@ moves to the *Answered* table at the bottom.
 |---|---|---|
 | Q-X1 | Who owns the **risk assessment** and who signs off before AUT EXT runs with the TurtleBot (instructor, lab manager)? | Team as system integrator, reviewed by the instructor. |
 | Q-X2 | ~~Damaged-part retrieval~~ → deferred (A-9). | Operator-emptied return trip kept in software. |
-| Q-X3 | "Not loaded" vs "lost in transfer": if the PLC placed a part on the conveyor but the photoeye did not count it, treat it as a discrepancy for an operator to check (not restocked)? | Yes (`JOB_STATE_MACHINE.md` §5). |
+| Q-X3 | "Not loaded" vs "lost in transfer": if the PLC reports the part dropped into the chute but the funnel photoeye did not count it, treat it as a discrepancy for an operator to check (not restocked)? | Yes (`JOB_STATE_MACHINE.md` §5). |
 | Q-X4 | Old requirements are void. Is there **any** number from the old midterm (budget, speed, size) that should still apply? | None carried over. |
 
 ## Station HMI (Q-H)
@@ -88,8 +88,17 @@ moves to the *Answered* table at the bottom.
 | ID | Question | Working assumption |
 |---|---|---|
 | Q-I1 | Ignition **version and licence** (Maker / trial / full), and which computer runs the Ignition gateway (station PC, a separate PC, the Windows laptop)? | Gateway on the Windows laptop on the lab network. |
-| Q-I2 | Which request bits does **Ignition** own (e.g. cell start/stop, conveyor jog in MANUAL) and which does the **station** own (`APEX_FromStation`)? Each bit must have exactly one writer. | Station owns `APEX_FromStation`; Ignition owns a separate `APEX_FromHMI` UDT. |
+| Q-I2 | Which request bits does **Ignition** own (e.g. cell start/stop, jog in MANUAL) and which does the **station** own (`APEX_FromStation`)? Each bit must have exactly one writer. | Station owns `APEX_FromStation`; Ignition owns a separate `APEX_FromHMI` UDT. |
 | Q-I3 | Should Ignition also show TurtleBot status (via a small REST/MQTT feed from the station), or is the robot only on the station GUI? | Robot only on the station GUI. |
+
+## Tilting return tray (Q-R4..Q-R7)
+
+| ID | Question | Working assumption |
+|---|---|---|
+| Q-R4 | Is the motorised tilting platform **on the TurtleBot** (the robot tips the parts into the bin) or **at the bin** (a platform the robot unloads onto)? | On the TurtleBot; one tray for delivery and return (`TRANSFER_AND_RETURN.md` §2.2). |
+| Q-R5 | Tray mock-up: can the tilted tray's lip reach over the return-bin rim (≈ 0.29 m from the robot centre), or does the bin need a catch-ramp above robot height? | Mock up with real parts first. |
+| Q-R6 | Should the return bin count the parts (photoeye → PLC) so the quarantine booking is verified? | Not counted; the reported damaged quantity is booked as "not verified". |
+| Q-R7 | Tilt motor and its power: motor type, stall current, supply (the TurtleBot 4 user rails are 300-500 mA). | Servo or geared motor + driver on a separately fused battery feed, microcontroller on USB. |
 
 ## Learning-Based Navigation (Q-R)
 
@@ -112,13 +121,15 @@ moves to the *Answered* table at the bottom.
 | A-1 | FlexBase is the **6 ft** model: 72" × 40". | 2026-11-12 |
 | A-2 | KUKA gripper picks **individual parts**; no bin handling by the arm. | 2026-11-12 |
 | A-3 | KR C4 **X66 (KLI)** on the **lab router** only; PLC and KR C4 never on the school network. | 2026-11-12 |
-| A-4 | Handoff via **conveyor + transfer station**; the TurtleBot stays outside the guarding at all times. | 2026-11-12 |
+| A-4 | ~~Handoff via conveyor + transfer station~~ (superseded by A-14); the TurtleBot stays outside the guarding at all times. | 2026-11-12 |
 | A-5 | The **C#** folder in Senior-Design is another project and is not part of APEx 2.0. | 2026-11-12 |
 | A-6 | apex-2.0 is a **fresh start**; Senior-Design is read-only reference. | 2026-11-12 |
-| A-7 | Transfer: **gravity chute** from the FlexBase onto the TurtleBot (`transfer_mode` B). | 2026-11-17 |
+| A-7 | ~~Gravity chute at the end of the conveyor (mode B)~~ (superseded by A-14). | 2026-11-17 |
 | A-8 | **Ignition** is the HMI for the FlexBase. | 2026-11-17 |
-| A-9 | **Damaged-part handling is deferred** to a later stage. | 2026-11-17 |
+| A-9 | ~~Damaged-part handling deferred~~ (superseded by A-15). | 2026-11-17 |
 | A-10 | **RL navigation policy is approved** ("RL policy is a go") - new stage *Learning-Based Navigation*. | 2026-11-17 |
 | A-11 | The lab is modelled in the **Gazebo simulator** for the TurtleBot's benefit (map + training world). | 2026-11-17 |
 | A-12 | **No work during spring break.** | 2026-11-17 |
 | A-13 | Lab router is a **Netgear Nighthawk R6700v3** (replaced the DGND3700v2 on 2026-11-19), LAN set to `192.168.0.0/24`, no internet. TurtleBot on 5 GHz Wi-Fi at `192.168.0.3`, station laptop wired at `192.168.0.2` (both reserved). See [`TURTLEBOT_NETWORK.md`](TURTLEBOT_NETWORK.md). | 2026-11-19 |
+| A-14 | **Transfer mode D:** the KUKA drops each part into a **gravity chute**, and a **funnel** puts it straight onto the TurtleBot's tray. No conveyor. Supersedes A-4 / A-7. | 2026-11-19 |
+| A-15 | **Damaged parts** go to a **return bin close to the FlexBase**; a **motor turns a platform from flat into a ramp** so the parts slide off. Supersedes A-9 (deferred). | 2026-11-19 |

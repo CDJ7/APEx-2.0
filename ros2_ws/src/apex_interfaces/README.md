@@ -12,6 +12,7 @@ everything else in the workspace is pure Python (ament_python).
 | `JobStatus` | `/apex/job_status` (2 Hz) | apex_orchestrator | Current job, state-machine step (`docs/JOB_STATE_MACHINE.md`), seconds in step, destination, route direction, parts expected/counted, queue, fault code/text, and the robot as the orchestrator sees it (pose, battery, docked, current route and remembered blockages - same for Nav2 and the kinematic stand-in) |
 | `JobEvent` | `/apex/job_events` | apex_orchestrator | One message per state-machine event (`job_queued`, `plc_ack`, `part_counted`, `load_complete`, `direction_blocked`, `rerouting`, `receipt_confirmed`, `fault`, `docked`, ...). Details are JSON in `data_json`. The station GUI books inventory movements from these. |
 | `CellStatus` | `/apex/cell_status` | apex_plc_bridge | **Read-only** view of the FlexBase PLC: cell mode, transfer mode, chute part count, load complete, job fault + text, stack lights, `safety_ok` and `safety_simulated` (display only). |
+| `TiltState` | `/apex/tilt/state` (10 Hz) | apex_tilt (`tilt_platform`, on the robot) | Tilt-tray state (FLAT / TILTING / RAMP / RETURNING / FAULT / UNKNOWN), fault text, completed cycles, both limit switches, whether the controller thinks the robot is moving |
 | `ArmStatus` | `/apex/arm_status` | apex_plc_bridge | KUKA KR C4 status **as reported by the PLC**: mode (T1/T2/AUT/AUT EXT), ready, busy, fault, program number. The station never talks to the KR C4 directly. |
 
 ## Services
@@ -22,7 +23,8 @@ everything else in the workspace is pure Python (ament_python).
 | `/apex/confirm_receipt` (`ConfirmReceipt`) | orchestrator | `job_id`, one `LineReceipt` per order line → `ok`, `message` (refused if the numbers do not add up) |
 | `/apex/confirm_return` (`ConfirmReturn`) | orchestrator | `job_id`, `count` of damaged parts taken out of the return bin |
 | `/apex/resolve_shortfall` (`ResolveShortfall`) | orchestrator | `job_id`, `action` = `send` (deliver what reached the bin) or `cancel` |
-| `/apex/operator` (`Operator`) | orchestrator | `action` = `stop` / `reset` / `resume` / `cancel`, `operator_name`, `job_id` (for cancel). Reset never restarts motion; Resume does. |
+| `/apex/operator` (`Operator`) | orchestrator | `action` = `stop` / `reset` / `resume` / `cancel` / `tray_home`, `operator_name`, `job_id` (for cancel). Reset never restarts motion; Resume does. |
+| `/apex/tilt/command` (`TiltCommand`) | apex_tilt | `action` = `dump` / `home` / `stop` → `ok`, `message`. Refused unless the robot is still (dump, home) and the tray is FLAT (dump). Normally only the orchestrator calls it. |
 | `/apex/plc/write_tag` (`WriteTag`) | apex_plc_bridge | `name` (APEX_FromStation member), `value_json` → `ok`, `message`. Anything outside the allow-list returns `REFUSED`. |
 
 ## Design notes

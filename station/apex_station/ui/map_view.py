@@ -80,7 +80,8 @@ class LabMapView(QWidget):
         p.setBrush(QBrush(QColor(theme.BORDER), Qt.BDiagPattern))
         p.drawRect(self.rect_px(ix0, iy0, ix1, iy1))
         # solids
-        colours = {"flexbase": "#1d3a5c", "conveyor": "#5d6a79", "transfer_station": "#8a6a3d"}
+        colours = {"flexbase": "#1d3a5c", "conveyor": "#5d6a79", "transfer_station": "#8a6a3d",
+                   "chute_support": "#5d6a79", "return_bin": "#8c3b3b"}
         for b in lab.solids:
             col = colours.get(b.name, "#6b5640" if b.name.endswith("_table") else "#444")
             p.setPen(QPen(QColor(theme.BORDER), 1))
@@ -99,6 +100,12 @@ class LabMapView(QWidget):
         p.setPen(QPen(QColor(theme.BORDER), 1))
         p.setBrush(QColor("#c08a3e"))
         p.drawPolygon(poly)
+        fn = lab.raw.get("funnel")
+        if fn:                                   # funnel above the transfer pose (dashed ring)
+            p.setPen(QPen(QColor("#c08a3e"), 2, Qt.DashLine))
+            p.setBrush(Qt.NoBrush)
+            r = fn["d_top"] / 2 * s
+            p.drawEllipse(self.to_px(ch["x_exit"], 0.0), r, r)
         # loop centre line
         corners = list(lab.corners.values())
         path = QPainterPath(self.to_px(*corners[0]))

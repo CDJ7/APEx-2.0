@@ -19,8 +19,15 @@ delivery station (and optionally back with damaged parts), then the next job or 
 ## The job, step by step
 
 `IDLE → WAIT_PLC_ACK → UNDOCKING → NAV_TO_TRANSFER → FINAL_APPROACH → WAIT_IN_POSITION →
-LOADING → NAV_TO_STATION → AWAIT_RECEIPT → (NAV_TO_RETURN → AWAIT_RETURN_CONFIRM) →
+LOADING → NAV_TO_STATION → AWAIT_RECEIPT → (NAV_TO_RETURN → RETURN_DUMP) →
 NAV_TO_DOCK → DOCKING → IDLE`, with `LOAD_SHORTFALL`, `FAULT` and `RESUME_WAIT` on the side.
+In `RETURN_DUMP` the robot's tray tilts the damaged parts into the return bin
+(`AWAIT_RETURN_CONFIRM` replaces it only with `return_mode: manual`).
+
+* **Tray interlock:** the robot never undocks or starts a route unless the tilt tray reports
+  FLAT (`TRAY_NOT_FLAT`). A dump starts only once the robot is still; a failed or stopped dump
+  stops the tray motor (`TILT_FAILED` / `TILT_TIMEOUT` / `TILT_REFUSED`); the operator action
+  `tray_home` brings the tray back flat. Design: docs/TRANSFER_AND_RETURN.md.
 
 * A job only starts with the cell in AUTO and the battery above `battery_min_start_pct`.
 * The robot parks **outside the guarding** under the chute; `AGV_AtTransfer` is a level the
