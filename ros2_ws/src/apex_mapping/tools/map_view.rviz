@@ -1,3 +1,4 @@
+# RViz layout for viewing a saved map (from aidanjmartin/tourbot, tourbot_navigation/tools/map_view.rviz, d4ba4ad).
 Panels:
   - Class: rviz_common/Displays
     Name: Displays

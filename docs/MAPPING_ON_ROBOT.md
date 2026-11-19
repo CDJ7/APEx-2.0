@@ -1,81 +1,108 @@
-# Mapping a floor with the controller
+# Mapping the lab with SLAM on the robot
 
-Drive the TurtleBot 4 around a floor with its controller while the robot builds a map and records the raw lidar data. One command on the laptop runs the whole process and copies the result back.
+The second way to map the lab, next to the station GUI's **Drive & Map** tab (README,
+*Mapping the lab with the real TurtleBot*). Here SLAM runs **on the robot** inside tmux, so the
+run survives Wi-Fi drops, and it records the **raw lidar data** (a rosbag) as well, so a map can
+be rebuilt later if SLAM went wrong. One command on the laptop starts it and copies the result
+back.
+
+Adapted from the TourBot project's teleop mapping (`aidanjmartin/tourbot`,
+`docs/teleop-mapping.md`). See [`ros2_ws/src/apex_mapping/NOTICE.md`](../ros2_ws/src/apex_mapping/NOTICE.md).
 
 ## What you need
 
-- The robot and the laptop on the same network (BlueWiFi), and SSH to the robot working with a key (`ssh ubuntu@10.80.91.57` logs in without a password).
-- The TurtleBot 4 controller, charged and paired with the robot.
-- The robot charged. A run of about 30 minutes uses roughly a quarter of the battery.
+- The laptop cabled to the lab router and the robot on its Wi-Fi (`ssh ubuntu@192.168.0.3`
+  logs in without a password, see [`TURTLEBOT_NETWORK.md`](TURTLEBOT_NETWORK.md)).
+- The robot charged. About 30 minutes of mapping uses roughly a quarter of the battery.
+- **One of:**
+  - the TurtleBot 4 controller, charged and paired with the robot, or
+  - the station GUI's **Drive & Map** tab to drive (run with `--no-controller`).
+- On the robot: `tmux`, `slam_toolbox`, `ros2 bag` with MCAP storage and `numpy`. The script
+  checks these and prints the `apt install` line if one is missing. The robot needs internet
+  for that, e.g. temporarily on a phone hotspot.
 
-## Map a floor
+## Map the lab
 
-1. Put the robot at the floor's starting point. The map's origin is wherever the robot starts.
-2. On the laptop, from the repository folder, run:
+1. Put the robot next to its dock: the map's origin is wherever the robot starts.
+2. On the laptop, from the repository folder, run one of:
 
+   ```bash
+   ros2_ws/src/apex_mapping/tools/map_lab.sh lab                  # drive with the controller
+   ros2_ws/src/apex_mapping/tools/map_lab.sh lab --no-controller  # drive from the station GUI
    ```
-   ros2_ws/src/tourbot_navigation/tools/map_floor.sh
-   ```
 
-3. Enter the floor number (1, 2 or 3) when asked.
-4. The program checks the robot and waits for you if needed:
-   - **Controller:** press the PS button to connect it.
-   - **Dock:** if the robot is on the dock, hold the controller's HOME button for 3 seconds to undock.
-   - **Lidar:** the program starts the lidar motor itself.
-5. When it shows `=== RECORDING ===`, drive: hold **L1** and use the **left stick**. Hold **R1** as well to go faster.
-6. To finish, hold **OPTIONS** for 2 seconds. The controller rumbles, the light ring flashes green, and the robot's screen shows "Map saved".
-7. The laptop copies the run and opens the map in RViz. Close RViz when you're done.
+   `lab` is the run name.
+3. The script copies the mapping scripts to `~/apex_mapping` on the robot, checks the robot,
+   and waits for you if needed:
+   - **Controller:** press the PS button to connect it (skipped with `--no-controller`).
+   - **Dock:** undock with the robot's menu (*Undock*), the controller's HOME button (hold
+     3 s), or back off with `S` in the GUI.
+   - **Lidar:** the script starts the lidar motor itself (the dock power saver stops it).
+4. When it shows `=== RECORDING ===`, drive slowly, following the README's driving pattern:
+   - with the controller: hold **L1** and use the **left stick** (hold **R1** too for faster);
+   - with the GUI: **Drive & Map** tab, tick *Driving enabled*, hold W A S D. **Do not press
+     Start mapping** in the GUI, because SLAM already runs on the robot. The GUI still shows the
+     robot's map live.
+5. To finish, hold **OPTIONS** on the controller for 2 seconds, or press **Ctrl-C** in the
+   terminal. The light ring flashes green and the robot's screen shows "Map saved".
+6. The laptop copies the run, prints how to make it the navigation map (`lab_real`), and opens
+   it in RViz. Close RViz when you're done.
 
-Ctrl-C in the terminal also stops and saves. Press it a second time only if saving gets stuck.
-
-### Driving tips
-
-- Drive slowly, at normal speed without R1, and turn gently.
-- Return to places you've already mapped, especially at the end of long corridors. This lets SLAM close loops and correct drift.
-- Keep people from walking alongside the robot where you can. They show up in the map as walls.
+Press Ctrl-C a second time only if saving gets stuck.
 
 ## Where the runs go
 
-Each run is a new folder and nothing is ever overwritten.
+Each run gets its own folder, and nothing is overwritten.
 
 | | Location |
 |---|---|
-| Robot | `~/maps/level<N>/<date>_<time>/` |
-| Laptop | `maps/level<N>/<date>_<time>/`, in the folder that contains the repository (outside the repository, so bags are never committed) |
+| Robot | `~/apex_maps/runs/<name>/<date>_<time>/` |
+| Laptop | `~/apex_maps/runs/<name>/<date>_<time>/` (outside the repository, so bags are never committed) |
 
 Each folder contains:
 
 | File | Contents |
 |---|---|
 | `map.pgm`, `map.yaml` | The 2D map, which Nav2 and RViz load directly |
-| `map.posegraph`, `map.data` | SLAM Toolbox's saved session, which can be reloaded to extend the map or to localize |
+| `map.posegraph`, `map.data` | slam_toolbox's saved session: reload it to extend the map or to localize |
 | `bag/` | The raw recording: `/scan`, `/odom`, `/tf` (including SLAM's corrected pose), `/tf_static`, `/imu` |
-| `run.yaml` | Floor, start time, duration, scan count, and what saved successfully |
+| `run.yaml` | Name, start time, duration, scan count, and what saved successfully |
 | `run.log`, `slam.log`, `bag.log` | Program output, for troubleshooting |
 
-If SLAM fails, the bag is still recorded, and the map can be rebuilt from it on the laptop.
+To make a run the navigation map, which is what `robot.launch.py` loads:
+
+```bash
+cp ~/apex_maps/runs/lab/<date_time>/map.pgm ~/apex_maps/lab_real.pgm
+sed 's/^image: .*/image: lab_real.pgm/' ~/apex_maps/runs/lab/<date_time>/map.yaml > ~/apex_maps/lab_real.yaml
+```
+
+Then draw the glass walls into `lab_real.pgm`, as in the README.
 
 ## If the connection drops
 
-The program runs inside tmux on the robot, so mapping keeps going if Wi-Fi drops. The laptop waits and copies the run when it finishes. Run `map_floor.sh` again to reattach and see the live status.
+Mapping keeps going on the robot inside tmux. The laptop waits and copies the run when it
+finishes. Run `map_lab.sh` again to reattach and see the live status.
 
 ## Settings
 
-Set these as environment variables before running `map_floor.sh`.
+Set these as environment variables before running `map_lab.sh`.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `TOURBOT_ROBOT` | `ubuntu@10.80.91.57` | SSH address of the robot |
-| `TOURBOT_MAPS_DIR` | `maps/` next to the repository | Where runs are copied on the laptop |
-| `TOURBOT_NO_RVIZ` | unset | Set to `1` to copy the run without opening RViz |
+| `APEX_ROBOT` | `ubuntu@192.168.0.3` | SSH address of the robot |
+| `APEX_MAPS_DIR` | `~/apex_maps/runs` | Where runs are copied on the laptop |
+| `APEX_NO_RVIZ` | unset | Set to `1` to copy the run without opening RViz |
 
-You can also run the robot side directly over SSH: `~/tourbot/ros2_ws/src/tourbot_navigation/scripts/teleop_map.sh --floor 2`.
+The SLAM settings are `ros2_ws/src/apex_mapping/config/slam.yaml` (TurtleBot 4 defaults with a
+wider loop-closure search). The GUI's *Start mapping* uses the same file.
 
 ## Troubleshooting
 
 | Problem | Fix |
 |---|---|
-| `No data from the robot base (/odom is silent)` | The robot's network changed after it booted, for example by switching to BlueWiFi. Run `sudo systemctl restart turtlebot4` on the robot, wait about a minute, and try again. |
+| `No data from the robot base (/odom is silent)` | The robot's network changed after it booted. Run `ssh -t ubuntu@192.168.0.3 'sudo systemctl restart turtlebot4'`, wait about a minute, and try again. |
 | `Lidar is not publishing /scan` | Check the lidar's USB cable, then restart the service as above. |
-| The robot doesn't move | Hold L1 while using the stick. If the controller's light is off, press the PS button. |
-| `Can't reach the robot` | Confirm both machines are on BlueWiFi and find the robot's address on its screen. Then run `TOURBOT_ROBOT=ubuntu@<address> ros2_ws/src/tourbot_navigation/tools/map_floor.sh`. |
+| `The robot is missing: ...` | Install the listed packages on the robot (`sudo apt install ...`, needs internet on the robot). |
+| The robot doesn't move (controller) | Hold L1 while using the stick. If the controller's light is off, press the PS button. |
+| The robot doesn't move (GUI) | *Driving enabled* ticked? The note should say *Ready*. Click inside the GUI window first. |
+| `Can't reach the robot` | Laptop cabled to the router? Robot screen shows `192.168.0.3`? Otherwise run `APEX_ROBOT=ubuntu@<address> .../map_lab.sh`. |

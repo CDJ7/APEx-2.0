@@ -1,3 +1,7 @@
+# slam_toolbox settings for mapping the APEx lab with the TurtleBot 4 (RPLIDAR A1).
+# Adapted from aidanjmartin/tourbot (tourbot_sim/config/slam.yaml, commit d4ba4ad): the
+# TurtleBot 4 defaults with a wider loop-closure search. Used by the station GUI's
+# "Start mapping" and by scripts/teleop_map.py.
 slam_toolbox:
   ros__parameters:
 
@@ -39,8 +43,9 @@ slam_toolbox:
     scan_buffer_maximum_scan_distance: 10.0
     link_match_minimum_response_fine: 0.1
     link_scan_maximum_distance: 1.5
-    # Raised from 3.0 (TurtleBot 4 default): AEB Level 1 has long corridors
-    # and loops, so look further for loop closures when returning to an area.
+    # Raised from 3.0 (TurtleBot 4 default; TourBot's value for long corridors): look
+    # further for loop closures when returning to an area, so the lab's loop around the
+    # FlexBase and island snaps shut even after some drift.
     loop_search_maximum_distance: 8.0
     do_loop_closing: true
     loop_match_minimum_chain_size: 10

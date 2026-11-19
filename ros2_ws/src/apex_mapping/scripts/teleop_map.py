@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
-"""Map an AEB floor on the real TurtleBot 4 by driving it with the TurtleBot 4 controller.
+"""Map the APEx lab on the real TurtleBot 4: SLAM + a raw bag, running on the robot itself.
 
-Runs on the robot. Usually started from the laptop with tools/map_floor.sh, which runs it
+Adapted from aidanjmartin/tourbot (ros2_ws/src/tourbot_navigation/scripts/teleop_map.py,
+commit d4ba4ad), borrowed with the TourBot team's knowledge. APEx changes: a run name instead
+of TourBot's per-level runs, ~/apex_maps/runs/, the TurtleBot 4 controller is optional (drive
+with the station GUI's Drive & Map tab instead), APEx wording.
+
+Runs on the robot. Usually started from the laptop with tools/map_lab.sh, which runs it
 inside tmux on the robot (so a Wi-Fi drop doesn't end the run) and copies the result back.
 
-  1. asks which floor (or --floor N)
-  2. checks the battery, the controller, the dock and the lidar, and starts the lidar
-     motor (the TurtleBot's power saver stops it on the dock)
-  3. starts SLAM Toolbox and records a raw bag of /scan /odom /tf /tf_static /imu
-  4. you drive with the controller: hold L1 and use the left stick (R1 for faster)
-  5. hold OPTIONS for 2 s (or press Ctrl-C) to stop: the map, SLAM pose graph and bag are
-     saved to ~/maps/level<N>/<YYYYmmdd_HHMM>/ and the controller rumbles and the light
-     ring flashes green
+  1. checks the battery, the controller (unless --no-controller), the dock and the lidar,
+     and starts the lidar motor (the TurtleBot's power saver stops it on the dock)
+  2. starts SLAM Toolbox and records a raw bag of /scan /odom /tf /tf_static /imu
+  3. you drive: with the controller (hold L1 + left stick, R1 for faster), or from the
+     station GUI's Drive & Map tab (W A S D) - do NOT press "Start mapping" there, this
+     script already runs SLAM; the GUI still shows this map live
+  4. hold OPTIONS for 2 s (or press Ctrl-C) to stop: the map, SLAM pose graph and bag are
+     saved to ~/apex_maps/runs/<name>/<YYYYmmdd_HHMM>/ and the light ring flashes green
 
 No Nav2 runs, so the Raspberry Pi only carries its own nodes, SLAM and the recorder. If
 SLAM fails, the bag is still recorded; build the map from it later on the laptop.
@@ -42,7 +47,7 @@ from slam_toolbox.srv import SerializePoseGraph
 from std_msgs.msg import String
 from std_srvs.srv import Empty
 
-FLOORS = ('1', '2', '3')
+DEFAULT_NAME = 'lab'
 BAG_TOPICS = ['/scan', '/odom', '/tf', '/tf_static', '/imu']
 JOY_DEVICE = '/dev/input/js0'
 # The TurtleBot 4 controller (DualShock 4 layout) on joy_linux: 4 = L1 (drive), 5 = R1
@@ -53,17 +58,20 @@ LOW_BATTERY = 0.20
 
 
 def find_slam_params():
-    """The team's SLAM settings from tourbot_sim, or None for the TurtleBot 4 defaults."""
+    """APEx SLAM settings (config/slam.yaml next to scripts/, as tools/map_lab.sh copies them to
+    the robot, or the installed apex_mapping package), or None for the TurtleBot 4 defaults."""
+    here = os.path.dirname(os.path.realpath(__file__))
+    path = os.path.realpath(os.path.join(here, '..', 'config', 'slam.yaml'))
+    if os.path.exists(path):
+        return path
     try:
         from ament_index_python.packages import get_package_share_directory
-        path = os.path.join(get_package_share_directory('tourbot_sim'), 'config', 'slam.yaml')
+        path = os.path.join(get_package_share_directory('apex_mapping'), 'config', 'slam.yaml')
         if os.path.exists(path):
             return path
     except Exception:
         pass
-    here = os.path.dirname(os.path.realpath(__file__))
-    path = os.path.join(here, '..', '..', 'tourbot_sim', 'config', 'slam.yaml')
-    return os.path.realpath(path) if os.path.exists(path) else None
+    return None
 
 
 def save_map_files(grid, path):
@@ -281,17 +289,12 @@ class Run:
                 except ProcessLookupError:
                     pass
 
-    def choose_floor(self):
-        floor = self.args.floor
-        while floor not in FLOORS:
-            try:
-                floor = input('Which floor are you mapping? [1/2/3]: ').strip()
-            except EOFError:
-                raise Abort()
-        return floor
+    def choose_name(self):
+        name = ''.join(c if c.isalnum() or c in '-_' else '_' for c in (self.args.name or '').strip())
+        return name or DEFAULT_NAME
 
-    def make_run_dir(self, floor):
-        base = os.path.join(os.path.expanduser(self.args.maps_dir), f'level{floor}')
+    def make_run_dir(self, name):
+        base = os.path.join(os.path.expanduser(self.args.maps_dir), name)
         stamp = time.strftime('%Y%m%d_%H%M')
         run_dir, n = os.path.join(base, stamp), 2
         while os.path.exists(run_dir):
@@ -322,15 +325,20 @@ class Run:
             tag = '[WARN]' if node.battery < LOW_BATTERY else '[OK]  '
             self.log(f'{tag} Battery: {pct}%' + (' (low, charge soon)' if tag == '[WARN]' else ''))
 
-        if not os.path.exists(JOY_DEVICE):
-            self.log('[WAIT] Controller: not connected. Press the PS button on the controller.')
+        if self.args.no_controller:
+            self.log('[OK]   Controller: not used (drive from the station GUI; Ctrl-C to save)')
+        elif not os.path.exists(JOY_DEVICE):
+            self.log('[WAIT] Controller: not connected. Press the PS button on the controller '
+                     '(or Ctrl-C and run again with --no-controller to drive from the GUI).')
             while not os.path.exists(JOY_DEVICE):
                 self.wait(0.5)
-        self.log('[OK]   Controller: connected')
+            self.log('[OK]   Controller: connected')
+        else:
+            self.log('[OK]   Controller: connected')
 
         if node.docked:
-            self.log('[WAIT] Robot is on the dock. Hold the controller HOME button for 3 s '
-                     'to undock (or lift it off the dock).')
+            self.log('[WAIT] Robot is on the dock. Undock it: the robot menu (Undock), the '
+                     'controller HOME button for 3 s, or back off with S in the GUI.')
             while node.docked:
                 self.wait(0.5)
             self.wait(2.0)
@@ -355,7 +363,7 @@ class Run:
         params = find_slam_params()
         if params:
             cmd.append(f'params:={params}')
-        self.log(f'Starting SLAM ({"tourbot_sim/config/slam.yaml" if params else "defaults"})'
+        self.log(f'Starting SLAM ({"apex_mapping/config/slam.yaml" if params else "TurtleBot 4 defaults"})'
                  ' - keep the robot still...')
         self.slam = self.spawn(cmd, 'slam.log')
         end = time.monotonic() + 60.0
@@ -379,11 +387,15 @@ class Run:
             raise RuntimeError('ros2 bag record exited right away (see bag.log)')
         self.recording = True
 
-    def drive(self, node, floor):
+    def drive(self, node, name):
         self.log('')
-        self.log('=== RECORDING ===  Drive: hold L1 + left stick (R1 = faster).')
-        self.log(f'Stop and save: hold OPTIONS for {self.args.hold:.0f} s (or Ctrl-C).')
-        node.show(f'Mapping L{floor}: REC')
+        if self.args.no_controller:
+            self.log('=== RECORDING ===  Drive from the station GUI (Drive & Map, W A S D).')
+            self.log('Stop and save: Ctrl-C here.')
+        else:
+            self.log('=== RECORDING ===  Drive: hold L1 + left stick (R1 = faster).')
+            self.log(f'Stop and save: hold OPTIONS for {self.args.hold:.0f} s (or Ctrl-C).')
+        node.show(f'Mapping {name}: REC')
         threading.Thread(target=node.rumble, args=(0.3,), daemon=True).start()
         t0 = time.monotonic()
         held_since = None
@@ -426,12 +438,12 @@ class Run:
             if held_since:
                 parts.append(f'SAVING in {self.args.hold - (now - held_since):.1f}s, keep holding')
             else:
-                parts.append('hold OPTIONS to save')
+                parts.append('Ctrl-C to save' if self.args.no_controller else 'hold OPTIONS to save')
             self.status(' | '.join(parts))
             time.sleep(0.2)
         return time.monotonic() - t0
 
-    def save(self, node, floor, duration, slam_ok):
+    def save(self, node, name, duration, slam_ok):
         self.log(f'Stopping ({self.stop_reason}). Saving...')
         node.show('Saving map...')
         map_path = os.path.join(self.run_dir, 'map')
@@ -461,7 +473,7 @@ class Run:
 
         info = node.map.info if node.map is not None else None
         with open(os.path.join(self.run_dir, 'run.yaml'), 'w') as f:
-            f.write(f'floor: {floor}\n'
+            f.write(f'name: {name}\n'
                     f'started: "{self.started}"\n'
                     f'duration_s: {duration:.0f}\n'
                     f'stopped_by: "{self.stop_reason}"\n'
@@ -489,10 +501,7 @@ class Run:
             print('ros2 not found: source /etc/turtlebot4/setup.bash first', file=sys.stderr)
             return 1
 
-        try:
-            floor = self.choose_floor()
-        except (Abort, KeyboardInterrupt):
-            return 130
+        name = self.choose_name()
 
         rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
         node = TeleopMapper(self.args.save_button)
@@ -500,17 +509,17 @@ class Run:
         executor.add_node(node)
         threading.Thread(target=executor.spin, daemon=True).start()
 
-        self.run_dir = self.make_run_dir(floor)
+        self.run_dir = self.make_run_dir(name)
         self.log_file = open(os.path.join(self.run_dir, 'run.log'), 'w')
         self.started = time.strftime('%Y-%m-%d %H:%M:%S')
-        self.log(f'TourBot teleop mapping: AEB Level {floor} -> {self.run_dir}')
+        self.log(f'APEx lab mapping: {name} -> {self.run_dir}')
         ok = False
         try:
             self.preflight(node)
             slam_ok = self.start_slam(node)
             self.start_bag()
-            duration = self.drive(node, floor)
-            ok = self.save(node, floor, duration, slam_ok)
+            duration = self.drive(node, name)
+            ok = self.save(node, name, duration, slam_ok)
         except Abort:
             self.log('Cancelled before recording started; nothing saved.')
             self.kill_children(signal.SIGINT)
@@ -521,7 +530,7 @@ class Run:
             self.log(f'[FAIL] {e}')
             if self.recording:
                 self.stop_reason = self.stop_reason or 'error'
-                self.save(node, floor, 0.0, False)
+                self.save(node, name, 0.0, False)
             self.kill_children(signal.SIGINT)
             if not self.recording and not os.path.exists(
                     os.path.join(self.run_dir, 'run.yaml')):
@@ -538,9 +547,13 @@ class Run:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
-    parser.add_argument('--floor', choices=FLOORS, help='AEB floor (asks if left out)')
-    parser.add_argument('--maps-dir', default='~/maps',
-                        help='Runs are saved to <maps-dir>/level<N>/<date_time>/')
+    parser.add_argument('--name', default=DEFAULT_NAME,
+                        help='Run name, e.g. lab or lab_north (default: lab)')
+    parser.add_argument('--no-controller', action='store_true',
+                        help='Do not wait for the TurtleBot 4 controller; drive from the station '
+                             'GUI and stop with Ctrl-C')
+    parser.add_argument('--maps-dir', default='~/apex_maps/runs',
+                        help='Runs are saved to <maps-dir>/<name>/<date_time>/')
     parser.add_argument('--save-button', type=int, default=DEFAULT_SAVE_BUTTON,
                         help='Joy button index that stops and saves (9 = OPTIONS)')
     parser.add_argument('--hold', type=float, default=2.0,

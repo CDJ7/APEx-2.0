@@ -3,11 +3,15 @@
 Runs the same commands as docs/TURTLEBOT_STATUS.md (task M2) as child processes of the
 station, on this computer (the robot's Raspberry Pi is too slow for SLAM):
 
-* start: ``ros2 launch turtlebot4_navigation slam.launch.py``  (slam_toolbox, mapping mode,
-  publishes ``/map`` and the ``map -> odom`` transform)
+* start: ``ros2 launch turtlebot4_navigation slam.launch.py sync:=false params:=<slam.yaml>``
+  (slam_toolbox, mapping mode, asynchronous; ``ros2_ws/src/apex_mapping/config/slam.yaml``, the
+  settings adapted from the TourBot project; publishes ``/map`` and ``map -> odom``)
 * save:  ``ros2 run nav2_map_server map_saver_cli -f <dir>/<name>`` -> ``<name>.yaml`` + ``.pgm``
   (default ``~/apex_maps/lab_real``, the path ``apex_bringup/launch/robot.launch.py`` expects),
-  plus a timestamped copy so a later save never loses an earlier map.
+  the slam_toolbox pose graph (``<name>.posegraph`` + ``.data``, to extend the map later), and a
+  timestamped copy so a later save never loses an earlier map.
+
+The other way to map - SLAM on the robot with a raw bag - is ``apex_mapping/tools/map_lab.sh``.
 
 Needs a sourced ROS 2 Jazzy environment (the ``ros2`` command) and the robot's clock in sync
 with this computer (Sensors page, *Clock offset*).
@@ -25,18 +29,29 @@ from collections import deque
 from datetime import datetime
 from pathlib import Path
 
+from apex_station.paths import WS_SRC
+
 log = logging.getLogger("station.mapping")
 
 DEFAULT_DIR = Path.home() / "apex_maps"
 DEFAULT_NAME = "lab_real"
+SLAM_PARAMS = WS_SRC / "apex_mapping" / "config" / "slam.yaml"
 
 
 class MappingError(RuntimeError):
     """Mapping could not be started / saved (message is shown to the user)."""
 
 
-def slam_command() -> list[str]:
-    return ["ros2", "launch", "turtlebot4_navigation", "slam.launch.py"]
+def slam_command(params: Path | None = SLAM_PARAMS) -> list[str]:
+    cmd = ["ros2", "launch", "turtlebot4_navigation", "slam.launch.py", "sync:=false"]
+    if params is not None and Path(params).exists():
+        cmd.append(f"params:={params}")
+    return cmd
+
+
+def serialize_command(path_stem: Path) -> list[str]:
+    return ["ros2", "service", "call", "/slam_toolbox/serialize_map", "slam_toolbox/srv/SerializePoseGraph",
+            f"{{filename: '{path_stem}'}}"]
 
 
 def save_command(path_stem: Path) -> list[str]:
@@ -114,8 +129,12 @@ class MappingSession:
         if res.returncode != 0 or not yaml_path.exists():
             last = out.splitlines()[-3:] if out else ["no output"]
             raise MappingError("map not saved: " + " | ".join(last))
+        try:                                           # pose graph: lets slam_toolbox extend this map later
+            subprocess.run(serialize_command(stem), capture_output=True, text=True, timeout=timeout_s)
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            log.warning("pose graph not saved: %s", exc)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        for ext in (".yaml", ".pgm"):                  # keep every save
+        for ext in (".yaml", ".pgm", ".posegraph", ".data"):    # keep every save
             src = stem.with_suffix(ext)
             if src.exists():
                 dst = self.map_dir / f"{stem.name}_{stamp}{ext}"
