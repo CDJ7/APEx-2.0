@@ -1,7 +1,7 @@
 """Draw the proposed APEx 2.0 lab layout (docs/img/lab_layout.png).
 
 All numbers are the *proposal* from docs/LAB_LAYOUT.md (map frame: origin at the
-FlexBase centre, +x along the 72" length toward the conveyor exit, metres).
+FlexBase centre, +x along the 72" length toward the chute side, metres).
 Run:  python tools/draw_lab_layout.py
 """
 
@@ -19,14 +19,14 @@ from matplotlib.patches import FancyArrowPatch, Polygon, Rectangle  # noqa: E402
 IN = 0.0254
 FB_W, FB_D = 72 * IN, 40 * IN            # FlexBase 6 ft model: 1.829 m x 1.016 m
 CORRIDOR = 1.524                         # 5 ft
-# inner island = FlexBase + 0.30 m service/door clearance, conveyor + transfer stand on +x
+# inner island = FlexBase + 0.30 m service/door clearance, chute + quarantine bin on +x
 ISLAND = (-FB_W / 2 - 0.30, -FB_D / 2 - 0.30, FB_W / 2 + 0.95, FB_D / 2 + 0.30)  # xmin, ymin, xmax, ymax
 OUTER = (ISLAND[0] - CORRIDOR, ISLAND[1] - CORRIDOR, ISLAND[2] + CORRIDOR, ISLAND[3] + CORRIDOR)
 
 POSES = {  # name: (x, y, yaw_deg, colour, label)
     "transfer": (2.08, 0.00, 90, "#1A7F8E", "Transfer pose\n(under chute)"),
     "transfer_staging": (2.08, -0.60, 90, "#7FB8C0", "Transfer\nstaging"),
-    "return_drop": (2.08, 0.75, 90, "#8E44AD", "Return-bin\nunload pose"),
+    "return_drop": (2.08, 0.75, 90, "#8E44AD", "Return pose\n(tilt tray into\nquarantine bin)"),
     "dock": (3.10, -1.20, 0, "#2E8B57", "Charging dock"),
     "station_a": (0.00, 1.95, 180, "#E07A2F", "Delivery\nstation A"),
     "station_b": (0.00, -1.95, 0, "#E07A2F", "Delivery\nstation B"),
@@ -49,13 +49,15 @@ def main() -> None:
             "Robot danger zone (workspace + stopping distance) must stay inside the FlexBase guarding.\n"
             "Hatched = service / door clearance around the cell - TurtleBot never enters it.",
             color="#C0392B", ha="center", va="top", fontsize=8)
-    # conveyor out of the +x end to the transfer station
-    ax.add_patch(Rectangle((FB_W / 2 - 0.5, -0.09), 1.35, 0.18, fc="#B0B7BE", ec="black"))
-    ax.text(FB_W / 2 + 0.05, 0.13, "Quickdraw conveyor", fontsize=8, ha="center")
-    ax.add_patch(Rectangle((FB_W / 2 + 0.55, -0.25), 0.40, 0.50, fc="#F6D7B0", ec="black"))
-    ax.text(FB_W / 2 + 0.75, -0.42, "Transfer station\n(stop + pusher + chute)", fontsize=8, ha="center", va="top")
-    ax.add_patch(Polygon([(FB_W / 2 + 0.95, -0.12), (FB_W / 2 + 0.95, 0.12), (2.05, 0.06), (2.05, -0.06)],
+    # parts shelf inside the cell; the arm places each part on a chute that
+    # leaves through an opening in the guarding glass and ends over the tray
+    ax.add_patch(Rectangle((FB_W / 2 - 0.45, -0.46), 0.35, 0.16, fc="#B0B7BE", ec="black"))
+    ax.text(FB_W / 2 - 0.27, -0.38, "Parts shelf", fontsize=7, ha="center", va="center")
+    ax.add_patch(Polygon([(FB_W / 2 - 0.15, -0.10), (FB_W / 2 - 0.15, 0.10), (2.05, 0.06), (2.05, -0.06)],
                          fc="#E9B872", ec="black"))
+    ax.text(FB_W / 2 + 0.55, -0.16, "Chute (through the glass)", fontsize=8, ha="center", va="top")
+    ax.add_patch(Rectangle((1.62, 0.62), 0.22, 0.26, fc="#D7BDE2", ec="black"))
+    ax.text(1.73, 0.95, "Quarantine\nbin", fontsize=7, ha="center", va="bottom")
     # corridor centre loop
     xs = [c[0] for c in CORNERS] + [CORNERS[0][0]]
     ys = [c[1] for c in CORNERS] + [CORNERS[0][1]]

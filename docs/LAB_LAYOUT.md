@@ -1,7 +1,7 @@
 # APEx 2.0 — Proposed lab layout
 
 **Stage:** Audit & Architecture. **This is a proposal.** The real room, the
-FlexBase orientation and the conveyor exit side are still to be confirmed
+FlexBase orientation and the side where the chute leaves the guarding are still to be confirmed
 ([`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md) Q-L1 to Q-L5). Once confirmed, the
 same numbers go into `ros2_ws/src/apex_bringup/config/poses.yaml` (Simulation
 Bring-up stage). **Poses live in YAML, never in code.**
@@ -14,15 +14,15 @@ the tables below; edit the script and re-run it if the layout changes.
 ## 1. Frame and fixed geometry
 
 - **Map frame:** origin at the centre of the FlexBase footprint, +x along
-  its 72" length toward the conveyor exit, +y to the left, metres, yaw in
+  its 72" length toward the chute side, +y to the left, metres, yaw in
   degrees (counter-clockwise from +x). On the real robot the saved SLAM
   map is aligned to this frame, or the poses are re-measured in the map's
   frame.
 - **FlexBase 6 ft:** 72" × 40" = **1.829 m × 1.016 m** (confirmed).
   Maximum height 7'6" (brochure).
 - **Island** (TurtleBot keep-out): FlexBase + 0.30 m service/door clearance
-  on every side, extended 0.95 m on +x for the conveyor run-out and the
-  transfer station: x ∈ [−1.21, 1.86], y ∈ [−0.81, 0.81]. Becomes a Nav2
+  on every side, extended 0.95 m on +x for the chute and the
+  quarantine bin: x ∈ [−1.21, 1.86], y ∈ [−0.81, 0.81]. Becomes a Nav2
   **keepout zone**. **⚠ RA**: door swing and operator access space must be
   checked against the real Lexan doors.
 - **Loop corridors:** 5 ft = **1.524 m** wide, all the way round the island.
@@ -36,7 +36,7 @@ the tables below; edit the script and re-run it if the layout changes.
 
 | Name | x (m) | y (m) | yaw (°) | Purpose / why here |
 |---|---|---|---|---|
-| `transfer` | 2.08 | 0.00 | 90 | Bin directly under the chute exit at the end of the conveyor, **outside the guarding**. The robot faces along the east corridor, so it can leave either way. Reached via the staging pose plus a precise final approach (fiducial). |
+| `transfer` | 2.08 | 0.00 | 90 | Tray directly under the chute outlet, **outside the guarding**. The robot faces along the east corridor, so it can leave either way. Reached via the staging pose plus a precise final approach (fiducial). |
 | `transfer_staging` | 2.08 | −0.60 | 90 | Where Nav2 hands over to the precise approach. |
 | `return_drop` | 2.08 | 0.75 | 90 | Next to the transfer station, beside the **quarantine bin**; the robot tilts its tray here to dump damaged parts. Out of the chute's fall line, so a return can never be confused with loading. Leave room for the tilted tray. |
 | `dock` | 3.10 | −1.20 | 0 | Charging dock on the outer wall of the east corridor, near the transfer station (short trip between jobs), out of the loop's driving line. Dock against the outer wall at x = 3.39. Needs a wall outlet. **[CONFIRM]** |
@@ -82,7 +82,7 @@ the reroute demo the obstacle must span the corridor width (e.g. a
 ## 5. Things to measure in the real room
 
 1. Room dimensions, door positions, columns, benches.
-2. FlexBase position and orientation; **which end the conveyor exits** and at what **height** (sets the chute length and slope).
+2. FlexBase position and orientation; **where the chute passes through the glass**, and the TurtleBot tray height (sets the chute outlet height and slope).
 3. Where the operator stands, where the pushbutton / acknowledge box is, and which side the Lexan doors open.
 4. Wall outlet for the charging dock.
 5. Floor: flat, no thresholds; the TurtleBot has 4.5 mm ground clearance.

@@ -3,12 +3,12 @@
 **KUKA KR 6 R900-2 + Automation NTH FlexBase + TurtleBot 4**
 
 APEx is an automated parts-delivery system for a small lab. A user orders
-parts at the main station; a KUKA arm in a FlexBase cell picks each part and
-puts it on a conveyor; a transfer station drops it into the bin of a
-TurtleBot 4; the TurtleBot drives around a loop corridor to the requesting
-workstation; the worker confirms every line as **OK**, **damaged** or
-**missing**; damaged parts ride back to the FlexBase in a separate return
-bin; and inventory, quarantine and discrepancies are updated at every step.
+parts at the main station; a KUKA arm in a FlexBase cell picks each part
+from a shelf and places it on a chute that leads out through the guarding
+into the tray of a TurtleBot 4; the TurtleBot drives around a loop corridor
+to the requesting workstation; the worker confirms every line as **OK**,
+**damaged** or **missing**; damaged parts stay on the tray and the TurtleBot
+tips them into a quarantine bin by the FlexBase; and inventory, quarantine and discrepancies are updated at every step.
 
 > **Status: Audit & Architecture stage complete, awaiting review.**
 > This stage is design only: no runnable code yet. See the
@@ -47,7 +47,7 @@ sequenceDiagram
     participant S as Station PC<br/>(StationCore + orchestrator)
     participant P as GuardLogix PLC
     participant K as KR C4 + KR 6 arm
-    participant X as Conveyor + transfer station
+    participant X as Chute + photoeye
     participant T as TurtleBot 4
     U->>S: order (multi-part)
     S->>S: check + reserve stock, create job
@@ -60,16 +60,15 @@ sequenceDiagram
     S->>P: Load_Request
     loop each part
         P->>K: select + start KRL pick program (AUT EXT)
-        K->>X: place part on the Quickdraw conveyor
-        P->>X: index conveyor, release stop station / pusher
-        X-->>P: photoeye counts the part into the bin
+        K->>X: pick part from the shelf, place it on the chute
+        X-->>P: part slides into the tray, photoeye counts it
     end
     P-->>S: Load_Complete (Chute_PartCount)
     S->>T: drive to station A or B (shorter clear direction, reroute if blocked)
     U->>S: receipt: OK / damaged / missing per line
     alt damaged parts returned
-        S->>T: drive to the return-unload pose
-        U->>S: operator empties return bin, confirms count
+        S->>T: drive to the return pose
+        T-->>S: tray tilted, damaged parts in the quarantine bin, tray level
     end
     S->>S: book inventory (damaged → quarantine, missing → discrepancy)
     S->>T: next job, or dock if the queue is empty / battery low
@@ -85,10 +84,10 @@ The full state machine, with a timeout and a fault for every step, is in
 | **Station GUI** (PySide6) + **StationCore** (SQLite) + **REST API** | Station PC | Inventory, multi-part orders, receiving, quarantine, job queue, robot/cell/arm status; REST for the workstation laptop. Adapted from the old design. |
 | **`apex_orchestrator`** (ROS 2) | Station PC | Turns orders into jobs, runs the job state machine, loop routing, timeouts and faults. Talks to Nav2 on the robot and to the PLC bridge. |
 | **`apex_plc_bridge`** (ROS 2, `pycomm3`) | Station PC | EtherNet/IP tag reads and **allow-listed non-safety writes** to the GuardLogix. Never touches safety tags. |
-| **Compact GuardLogix 5380** | FlexBase | Owns the cell: conveyor, transfer station, KUKA program selection (AUT EXT over EtherNet/IP I/O), and in its **safety task** the PLd circuit and the KUKA safety interface (CIP Safety or X11). |
+| **Compact GuardLogix 5380** | FlexBase | Owns the cell: chute photoeye, KUKA program selection (AUT EXT over EtherNet/IP I/O), and in its **safety task** the PLd circuit and the KUKA safety interface (CIP Safety or X11). |
 | **KR C4 compact + KR 6 R900-2** | FlexBase | Runs KRL pick programs started by the PLC. **Our Python code never commands the arm.** |
 | **TurtleBot 4** | Mobile | Nav2 on a saved map, named poses from YAML, docking, battery reporting. |
-| **`apex_cell_sim`** | Station PC (simulation) | Imitates the PLC + KUKA + conveyor + transfer handshake with the **same tag names and timing**, so moving to hardware is a config change. |
+| **`apex_cell_sim`** | Station PC (simulation) | Imitates the PLC + KUKA + chute handshake with the **same tag names and timing**, so moving to hardware is a config change. |
 
 Diagram and details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -100,7 +99,8 @@ Diagram and details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 | **KR C4 compact** | Operating modes T1 (≤ 250 mm/s), T2, AUT, **AUT EXT** (PLC control). Safety via **X11** (discrete, dual-channel) **or** **X66** Ethernet safety (CIP Safety / PROFIsafe), never both. X66 = KLI to the plant network; X69 = KSI for the WorkVisual laptop. | KUKA KR C4 compact specification V10 |
 | **Automation NTH FlexBase, 6 ft** | 72" × 40" (1.83 × 1.02 m), max height 7'6". Compact GuardLogix 5380, 1734 POINT I/O, PLd safety circuit, managed Ethernet switch, IFM IO-Link master, SMC EtherNet/IP valve bank, 3-segment stack light, optional Quickdraw conveyor with stop stations | FlexBase brochure |
 | **TurtleBot 4 (standard)** | Create® 3 base, Raspberry Pi 4B, RPLIDAR A1M8, OAK-D Pro, display. 342 × 339 × 351 mm, 3.9 kg, **max payload 9 kg**, 0.31 m/s (safe mode), 2.5–4 h runtime. Top plate 270 × 250 mm acrylic, 4 × M4 | TurtleBot 4 user manual, hardware repo |
-| **Transfer station** (to design) | `transfer_mode` A (default): stop station + SMC pneumatic pusher + padded chute; B: gravity chute; C: lift-and-locate + tilting tray. Part-present photoeye counts every part. | Project brief |
+| **Transfer: arm → chute** (to design) | The KUKA picks from a **shelf inside the FlexBase** and places each part on a padded **chute** that passes through an opening in the guarding glass to the TurtleBot's tray. A photoeye counts every part. No conveyor in the transfer. | Team decision 2026-11-19 |
+| **TurtleBot payload** (to design) | Tray with a **tilt actuator** to dump damaged parts, own 12 V battery, about **3 kg** of parts per trip; lift optional. See [`BIN_FIXTURE.md`](docs/BIN_FIXTURE.md). | Team decision 2026-11-19 |
 
 Manuals are kept locally (copyright); see [`docs/manuals/README.md`](docs/manuals/README.md).
 
@@ -121,8 +121,8 @@ These rules are **non-negotiable** and apply to every stage:
 
 The FlexBase sits in the middle of the lab, surrounded by a 5 ft loop
 corridor. Two delivery stations face each other on opposite sides; the
-transfer station, the return-unload pose and the charging dock are at the
-conveyor end. Poses are in the map frame (origin = FlexBase centre) and will
+chute outlet (transfer pose), the return pose with the quarantine bin and
+the charging dock are at the east end. Poses are in the map frame (origin = FlexBase centre) and will
 live in YAML. Everything here is a **proposal** to confirm against the real
 room: [`docs/LAB_LAYOUT.md`](docs/LAB_LAYOUT.md).
 
@@ -201,8 +201,8 @@ Current working assumptions, each listed in
 [`docs/OPEN_QUESTIONS.md`](docs/OPEN_QUESTIONS.md) for confirmation:
 - ROS 2 **Jazzy** on the TurtleBot.
 - **Ubuntu 24.04** station PC, with a Windows laptop for Studio 5000 and WorkVisual.
-- **Transfer option A** (stop station + pneumatic pusher + padded chute); the chute slopes from the conveyor exit to a fixed outlet, and a short lift on the TurtleBot matches it.
+- **Arm-to-chute transfer** (decided): the KUKA places parts from a shelf onto a chute through the guarding; no conveyor, pusher or pallets in the transfer.
+- **Fixed-height tray, no lift** (proposed): the chute outlet is built to the TurtleBot tray height.
 - The TurtleBot **tilts its tray to dump damaged parts** into a quarantine bin by itself.
-- **Pallets** on the Quickdraw conveyor.
 - **CIP Safety** to the KUKA if the option is installed, otherwise X11.
 - One TurtleBot.
