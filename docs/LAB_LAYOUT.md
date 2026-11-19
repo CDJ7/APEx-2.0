@@ -38,7 +38,7 @@ the tables below; edit the script and re-run it if the layout changes.
 |---|---|---|---|---|
 | `transfer` | 2.08 | 0.00 | 90 | Bin directly under the chute exit at the end of the conveyor, **outside the guarding**. The robot faces along the east corridor, so it can leave either way. Reached via the staging pose plus a precise final approach (fiducial). |
 | `transfer_staging` | 2.08 | −0.60 | 90 | Where Nav2 hands over to the precise approach. |
-| `return_drop` | 2.08 | 0.75 | 90 | Next to the transfer station, where the operator empties the **return bin**. Out of the chute's fall line, so a return can never be confused with loading. |
+| `return_drop` | 2.08 | 0.75 | 90 | Next to the transfer station, beside the **quarantine bin**; the robot tilts its tray here to dump damaged parts. Out of the chute's fall line, so a return can never be confused with loading. Leave room for the tilted tray. |
 | `dock` | 3.10 | −1.20 | 0 | Charging dock on the outer wall of the east corridor, near the transfer station (short trip between jobs), out of the loop's driving line. Dock against the outer wall at x = 3.39. Needs a wall outlet. **[CONFIRM]** |
 | `station_a` | 0.00 | 1.95 | 180 | Delivery station A on the outer side of the north corridor, opposite the FlexBase. |
 | `station_b` | 0.00 | −1.95 | 0 | Delivery station B on the outer side of the south corridor, the opposite side to A. |

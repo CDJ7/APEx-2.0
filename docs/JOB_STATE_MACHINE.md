@@ -9,6 +9,12 @@ One **job** = one order = one TurtleBot trip:
 **pickup** (conveyor transfer) → **delivery** → **return** (only if damaged
 parts came back) → **finish**.
 
+The TurtleBot carries a **lift + tilt tray** (`BIN_FIXTURE.md`). The tray is
+raised only while parked under the chute and tilted only at `return_drop`,
+where the robot **dumps damaged parts itself** into the quarantine bin.
+**No Nav2 goal is ever sent unless the tray is down and level**
+(`lift_down && tilt_home`).
+
 ## 1. Diagram
 
 ```mermaid
@@ -20,7 +26,8 @@ stateDiagram-v2
         WAIT_PLC_ACK --> UNDOCKING: Job_Ack (Job_ID echoed)
         UNDOCKING --> NAV_TO_TRANSFER: undocked (or already undocked)
         NAV_TO_TRANSFER --> FINAL_APPROACH: staging pose reached
-        FINAL_APPROACH --> WAIT_IN_POSITION: parked under chute → AGV_AtTransfer
+        FINAL_APPROACH --> LIFT_RAISE: parked under chute (tray down)
+        LIFT_RAISE --> WAIT_IN_POSITION: tray at chute height → AGV_AtTransfer
         WAIT_IN_POSITION --> LOADING: AGV_InPosition_Confirmed + Cell_ReadyForAGV → Load_Request
         state LOADING {
             [*] --> PICK_PLACE
@@ -30,7 +37,8 @@ stateDiagram-v2
             PART_COUNTED --> PICK_PLACE: more parts
             PART_COUNTED --> [*]: last part
         }
-        LOADING --> LOAD_VERIFY: Load_Complete
+        LOADING --> LIFT_LOWER: Load_Complete
+        LIFT_LOWER --> LOAD_VERIFY: lift_down
     }
 
     state Delivery {
@@ -44,8 +52,9 @@ stateDiagram-v2
 
     state Return {
         DEPART_STATION --> NAV_TO_RETURN: damaged > 0
-        NAV_TO_RETURN --> AWAIT_RETURN_CONFIRM: at return-unload pose → Return_Request
-        AWAIT_RETURN_CONFIRM --> FINISH: operator emptied return bin + confirmed count
+        NAV_TO_RETURN --> TILT_DUMP: at return_drop (tray beside quarantine bin)
+        TILT_DUMP --> TILT_HOME: tilted, dwell elapsed
+        TILT_HOME --> FINISH: tilt_home
     }
 
     DEPART_STATION --> FINISH: no damaged parts
@@ -64,7 +73,7 @@ table in section 2.
 ```mermaid
 stateDiagram-v2
     direction LR
-    ACTIVE: Any active step (P2-P8, D1-D2, R1-R2, F2)
+    ACTIVE: Any active step (P2-P8, D1-D2, R1-R3, F2)
     ACTIVE --> FAULT: step timeout / PLC Job_Fault or Transfer_Fault /<br/>heartbeat lost / cell left AUTO / safety status changed /<br/>robot hazard / operator Stop
     FAULT --> RECOVERING: operator Reset in GUI<br/>AND PLC reports fault cleared
     RECOVERING --> RESUME_WAIT: job re-queued at a safe step
@@ -84,16 +93,19 @@ stateDiagram-v2
 | P3 | `UNDOCKING` | `undock()` if docked | undocked | `T_undock` = 30 s | `FAULT: UNDOCK_FAILED` |
 | P4 | `NAV_TO_TRANSFER` | route to the transfer **staging** pose (shorter clear direction) | Nav2 succeeded | `T_nav_leg` = 180 s | one reroute the other way; then `FAULT: NAV_BLOCKED` |
 | P5 | `FINAL_APPROACH` | precise approach under the chute (fiducial dock) | within `transfer_xy_tol` / `transfer_yaw_tol` | `T_final_approach` = 45 s, `max_retries` = 3 | `FAULT: PARK_FAILED` |
+| P5a | `LIFT_RAISE` | `SetLift(chute_height_mm)` | tray at target height (feedback within `lift_tol_mm`) | `T_lift` = 15 s | `FAULT: LIFT_FAILED` |
 | P6 | `WAIT_IN_POSITION` | write `AGV_AtTransfer` = 1 | `AGV_InPosition_Confirmed` (PLC photoeye/sensor) **and** `Cell_ReadyForAGV` | `T_in_position` = 15 s | `FAULT: NOT_IN_POSITION` |
 | P7 | `LOADING` | write `Load_Request` | `Load_Complete` | `T_load_total` = 60 s + `T_per_part` = 30 s × parts | `FAULT: LOAD_TIMEOUT` (or the PLC's `Transfer_Fault` / `Job_Fault` code) |
 | P7a | `PICK_PLACE` | (PLC) select KRL program for the part, start | part placed on the conveyor | (PLC) `T_pick` | PLC raises `Job_Fault` |
 | P7b | `CONVEYOR_INDEX` | (PLC) `Conveyor_Run` | part at stop station sensor | (PLC) `T_convey` | PLC raises `Transfer_Fault` |
 | P7c | `TRANSFER_RELEASE` | (PLC) `StopStation_Release` / `Pusher_Extend` (mode A) | photoeye pulse | (PLC) `T_drop` | PLC raises `Transfer_Fault` |
+| P7d | `LIFT_LOWER` | `SetLift(0)` | `LIFT_DOWN` switch made | `T_lift` = 15 s | `FAULT: LIFT_FAILED` (robot does **not** drive) |
 | P8 | `LOAD_VERIFY` | compare `Chute_PartCount` with the ordered total | equal | — | **shortfall**: pause; GUI asks the operator to *retry missing parts*, *send with shortfall* (lines become **NOT LOADED**) or *cancel* |
 | D1 | `NAV_TO_STATION` | route to `station_a` / `station_b`, shorter clear direction | Nav2 succeeded | `T_nav_leg` | reroute once the other way (`REROUTE`); both blocked → `FAULT: NAV_BLOCKED` |
 | D2 | `AWAIT_RECEIPT` | GUI/REST prompt at the station | receipt confirmed: every line OK + damaged + missing = loaded qty | `T_receipt_remind` = 300 s (reminder, stack-light/GUI alert); `T_receipt_max` = 1800 s | after max: `FAULT: NO_RECEIPT` (robot stays parked, does not leave with parts) |
 | R1 | `NAV_TO_RETURN` | route to `return_drop` | Nav2 succeeded | `T_nav_leg` | reroute / `FAULT: NAV_BLOCKED` |
-| R2 | `AWAIT_RETURN_CONFIRM` | write `Return_Request`; GUI asks the operator to empty the return bin | operator confirms count (must equal damaged qty, or records the difference) | `T_return_remind` = 300 s | reminder only; robot waits |
+| R2 | `TILT_DUMP` | `TiltDump()` to `tilt_dump_deg` (40–45°), hold `T_dump_dwell` = 3 s | tilted and dwell elapsed | `T_tilt` = 10 s | `FAULT: TILT_FAILED` |
+| R3 | `TILT_HOME` | tilt back level | `TILT_HOME` switch made | `T_tilt` = 10 s | `FAULT: TILT_FAILED` (robot does **not** drive) |
 | F1 | `FINISH` | book inventory (below), release job | — | — | — |
 | F2 | `NAV_TO_DOCK` | route to the dock staging pose, then `dock()` | `DockStatus.is_docked` | `T_dock` = 120 s, 2 retries | `FAULT: DOCK_FAILED` |
 
@@ -104,11 +116,13 @@ stateDiagram-v2
 - KUKA not ready during loading.
 - Create 3 hazard / stuck / wheel-drop reported.
 - Operator **Stop** in the GUI.
+- Payload status stale, or `lift_down` / `tilt_home` lost while driving (`PAYLOAD_NOT_STOWED`).
 
 ## 3. Fault handling
 
 - **Entering `FAULT`:**
   - cancel all Nav2 goals; the robot stops where it is, outside the cell by design;
+  - stop the lift and tilt actuators (the `apex_payload` watchdog also stops them on its own);
   - write `Job_Fault_Station` = 1 to the PLC, which holds the conveyor and transfer and ends the KRL program at a safe point;
   - stack light shows the fault; the GUI shows the fault code, the step and the timestamp.
 - **Recovery needs an operator Reset in the GUI** (logged with user and source) **and** the PLC reporting the cell fault cleared. Reset **never restarts motion by itself**: after reset the job is re-queued at a safe step (e.g. P4 navigate to transfer, or D1 navigate to station), and the operator must press **Resume**.
@@ -138,16 +152,18 @@ route(target):
 | Order submitted | ordered qty **reserved** (on-hand − qty) |
 | Part not loaded (short count, operator sends with shortfall) | reserved qty returned to on-hand **if the PLC reports the part was never picked**; if the PLC counted it onto the conveyor but the photoeye did not, it becomes a **lost-in-transfer** discrepancy for an operator to check (**[CONFIRM]** this rule) |
 | Receipt: OK | consumed (delivered) |
-| Receipt: damaged | goes in the return bin; on return confirm → **quarantine** count (never restocked) |
+| Receipt: damaged | stays on the tray; after `TILT_HOME` at `return_drop` → **quarantine** count (never restocked). Booked from the receipt quantity unless a quarantine-bin counter is fitted (`BIN_FIXTURE.md` Q-B4). |
 | Receipt: missing | **discrepancy** (missing at delivery), no stock change |
-| Return confirm count ≠ damaged qty | difference logged as a discrepancy |
+| Quarantine-bin count ≠ damaged qty (only if a counter is fitted, or at an operator's periodic quarantine check) | difference logged as a discrepancy |
 | Job cancelled before loading | reservation released |
 
 ## 6. Risk-assessment points in this sequence (⚠ RA)
 
 - Robot parking under the chute: pinch/crush points between chute, bin and robot; falling parts.
 - Pusher / stop station motion near people at the transfer station (outside the guarding).
-- Operator reaching into the return bin at the FlexBase while the robot could move: the robot must be **stopped and held** during `AWAIT_RETURN_CONFIRM`.
+- Tray lift under the chute: pinch point between the raised tray and the chute outlet.
+- Tray tilt at `return_drop`: pinch at the hinge; parts falling into the quarantine bin; nobody reaching in while tilting.
+- Robot driving with the tray raised or tilted: tipping, so the motion interlock (`lift_down && tilt_home`) is required.
 - Worker reaching into the delivery bin at a station: same, during `AWAIT_RECEIPT`.
 - Fault recovery: no automatic restart; Resume needs an operator.
 

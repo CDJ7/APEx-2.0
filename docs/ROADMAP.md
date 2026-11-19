@@ -8,7 +8,7 @@ where the team reviews the result before the next stage starts.
 | **Audit & Architecture** | Understand the old code, the manuals and the TurtleBot 4 references; design the new system before writing code. | `docs/AUDIT.md`, `ARCHITECTURE.md`, `JOB_STATE_MACHINE.md`, `LAB_LAYOUT.md`, `OPEN_QUESTIONS.md`, `RISK_ASSESSMENT_POINTS.md`; old code archived with history | ✅ **Done, awaiting checkpoint review** |
 | **Simulation Bring-up** | Everything runs with no hardware. | `ros2_ws/` with `apex_interfaces`, `apex_orchestrator`, `apex_plc_bridge`, `apex_cell_sim`, `apex_bringup`; Gazebo world of our lab (FlexBase 72" × 40", 5 ft loop, two stations, dock, conveyor, transfer station, chute, obstacles); poses in YAML; network profiles `network_school.yaml` / `network_lab.yaml`. Demos: (a) full order, (b) blocked corridor → reroute the other way, (c) damaged-part return | ⏳ Next |
 | **Station HMI Upgrade** | Adapt the old station GUI to the new system. | Live map (pose, battery, dock, job, bin contents); FlexBase status (PLC link, **read-only** safety state, stack-light mirror); KUKA status (mode, ready/busy/fault, program); job queue; quarantine view; REST API kept | Planned |
-| **Integration Documentation** | Everything needed to commission the real hardware. | `TURTLEBOT4_SETUP.md`, `PLC_INTEGRATION.md`, `KUKA_INTEGRATION.md`, `TRANSFER_STATION.md`, `BIN_FIXTURE.md` | Planned |
+| **Integration Documentation** | Everything needed to commission the real hardware. | `TURTLEBOT4_SETUP.md`, `PLC_INTEGRATION.md`, `KUKA_INTEGRATION.md`, `TRANSFER_STATION.md`, `BIN_FIXTURE.md` (design draft already started) | Planned |
 
 ## Checkpoint rule
 

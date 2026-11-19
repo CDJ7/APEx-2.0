@@ -12,7 +12,7 @@ moves to the *Answered* table at the bottom.
 | Q-S1 | **ROS 2 distro on our TurtleBot 4.** Run `echo $ROS_DISTRO` or `cat /etc/os-release` on the robot's Raspberry Pi. | **Jazzy** (Ubuntu 24.04). All TurtleBot repos on the `jazzy` branch. |
 | Q-S2 | **Station PC.** Is it a dedicated Ubuntu 24.04 machine (or dual boot) that can run ROS 2 Jazzy + Gazebo? Studio 5000 and WorkVisual are Windows-only, so they would run on a separate Windows laptop. | Station PC = Ubuntu 24.04 + ROS 2 Jazzy; separate Windows laptop for Studio 5000 / WorkVisual. |
 | Q-S3 | **Simulation in the cloud session.** To build and run the Gazebo demos here, the session needs `packages.ros.org` and `packages.osrfoundation.org` allowed (currently blocked). OK to request that network change? | Otherwise code and world files are written here, and the demos are run on the team's Ubuntu machine. |
-| Q-S4 | **Parts to deliver:** how many part types, size and weight of each (heaviest?), how many parts per order, how they are stored in the cell (trays, fixtures, a parts rack?). Drives gripper choice, pick positions, conveyor pallet nests, bin size and the 9 kg payload budget. | Small parts ≤ 0.5 kg, ≤ 10 per order (placeholder). |
+| Q-S4 | **Parts to deliver:** light **3D-printed** parts (answered, A-8). Still needed: how many part types, largest size and heaviest part, most parts per order, how they are stored in the cell (trays, fixtures, a parts rack?). Drives gripper choice, pick positions, conveyor pallet nests and tray size. | ≤ 10 per order (placeholder). |
 | Q-S5 | **Transfer method** A / B / C (`docs/ARCHITECTURE.md` §3.6). | **A**: stop station + SMC pusher + padded chute (default). `transfer_mode` stays configurable. |
 | Q-S6 | **Pallet or directly on the belt?** Quickdraw is normally a pallet conveyor. Pallets give a repeatable part position for the pusher and the photoeye; bare belt is simpler but parts can roll or rotate. | **Proposal: pallets with a simple nest**, with the pusher pushing the part off the pallet into the chute. **[CONFIRM]** once parts are known. |
 
@@ -21,7 +21,7 @@ moves to the *Answered* table at the bottom.
 | ID | Question | Current assumption |
 |---|---|---|
 | Q-L1 | Room dimensions, door, columns. Does a 6.1 m × 4.7 m area fit? | Proposed footprint in `LAB_LAYOUT.md`. |
-| Q-L2 | FlexBase orientation and **which end the Quickdraw conveyor exits**, plus the conveyor height at the exit. | Conveyor exits the +x (east) end. Height unknown; it sets the chute slope. |
+| Q-L2 | FlexBase orientation and **which end the Quickdraw conveyor exits**, plus the conveyor height at the exit. | Conveyor exits the +x (east) end. The chute starts at the exit (A-9); the exit height still needs **measuring**, as it sets the chute slope and length (`BIN_FIXTURE.md` §3). |
 | Q-L3 | Operator side of the FlexBase; position of the start/stop/reset pushbutton box and the safety-gate **acknowledge button** (must be outside the guarding). | Operator at the east end, near the transfer station. |
 | Q-L4 | Where can the charging dock go (wall outlet)? | Outer wall of the east corridor, at (3.10, −1.20). |
 | Q-L5 | What do the delivery stations physically look like (table? shelf?), and where does the worker confirm receipt (station PC GUI, the workstation laptop, a tablet at each station)? | Workstation laptop via REST, or the main GUI. |
@@ -67,9 +67,20 @@ moves to the *Answered* table at the bottom.
 | ID | Question | Current assumption |
 |---|---|---|
 | Q-X1 | Who owns the **risk assessment** and who signs off before AUT EXT runs with the TurtleBot (instructor, lab manager)? | Team as system integrator, reviewed by the instructor. |
-| Q-X2 | Damaged-part retrieval: the updated brief says an **operator** empties the return bin and confirms the count. Confirm there is **no** arm handling of the return bin in v1. | Operator only. |
 | Q-X3 | "Not loaded" vs "lost in transfer": if the PLC placed a part on the conveyor but the photoeye did not count it, treat it as a discrepancy for an operator to check (not restocked)? | Yes (`JOB_STATE_MACHINE.md` §5). |
 | Q-X4 | Old requirements are void. Is there **any** number from the old midterm (budget, speed, size) that should still apply? | None carried over. |
+
+## TurtleBot payload: lift + tilt tray (Q-B)
+
+See [`BIN_FIXTURE.md`](BIN_FIXTURE.md) §9.
+
+| ID | Question | Current assumption |
+|---|---|---|
+| Q-B1 | Conveyor exit height above the floor (same as Q-L2). | Unknown; measure. |
+| Q-B2 | Largest and heaviest 3D-printed part; most parts per trip. | Light, small; ≤ 10 per trip. |
+| Q-B3 | Quarantine bin at `return_drop`: size, height, which side of the robot. | Beside the robot; the tilt direction follows from it. |
+| Q-B4 | How the dumped count is checked. | Booked from the receipt; optional break-beam counter on the bin inlet. |
+| Q-B5 | Final actuator, servo, driver and battery models. | Mini 12 V actuators with feedback (e.g. Actuonix L16-R class) on a separate 12 V pack; pick after a prototype. |
 
 ## Answered
 
@@ -81,3 +92,7 @@ moves to the *Answered* table at the bottom.
 | A-4 | Handoff via **conveyor + transfer station**; the TurtleBot stays outside the guarding at all times. | 2026-11-12 |
 | A-5 | The **C#** folder in Senior-Design is another project and is not part of APEx 2.0. | 2026-11-12 |
 | A-6 | apex-2.0 is a **fresh start**; Senior-Design is read-only reference. | 2026-11-12 |
+| A-7 | TurtleBot Pi runs **Ubuntu 24.04.1 + ROS 2 Jazzy** (verified on the robot; answers Q-S1). | 2026-11-17 |
+| A-8 | Parts are **light 3D-printed parts**. | 2026-11-19 |
+| A-9 | The **chute starts at the conveyor exit** and slopes down to a fixed outlet; a short lift on the robot matches the outlet height. | 2026-11-19 |
+| A-10 | The **robot dumps damaged parts itself** by tilting its tray at `return_drop` (replaces the old Q-X2 assumption that an operator empties a return bin). | 2026-11-19 |

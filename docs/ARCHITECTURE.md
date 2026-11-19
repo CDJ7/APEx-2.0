@@ -258,6 +258,10 @@ point of control* principle and needs its own risk assessment. **⚠ RA**
   Create® 3 `Dock` / `Undock` actions (`irobot_create_msgs`), which use the
   dock's IR beacons. Dock state comes from the `DockStatus` topic, battery
   from `/battery_state`.
+- **Payload module** (`BIN_FIXTURE.md`): a lift + tilt tray on the top
+  plate, powered by its **own 12 V battery** (the TurtleBot's user power pins
+  give only 300 mA). Driven by `apex_payload` on the Pi. **Nav2 goals are only
+  sent with the tray down and level.** **⚠ RA**
 - Nav2 **keepout zones** (costmap filter) mark the FlexBase island and service
   clearance so the planner never routes through them. This is a planning aid,
   **not a safety function**: the safety argument is that the arm's danger
@@ -272,6 +276,9 @@ point of control* principle and needs its own risk assessment. **⚠ RA**
 - A **part-present photoeye** counts every part landing in the bin. The
   orchestrator compares the count with the order; a shortfall is a
   **"not loaded"** discrepancy, distinct from *missing at delivery*.
+- The chute starts at the conveyor exit and slopes down to a **fixed outlet
+  height**; the robot's lift raises the tray to just below it while parked.
+  Cutting the FlexBase glass for the chute changes the guarding. **⚠ RA-01**
 - Chute and transfer station are **pinch-point and falling-part hazards**
   for people. **⚠ RA**
 - Details in `docs/TRANSFER_STATION.md` (Integration Documentation stage).
@@ -283,6 +290,7 @@ point of control* principle and needs its own risk assessment. **⚠ RA**
 | `apex_interfaces` | msgs: `JobStatus`, `RobotStatus`, `CellStatus`, `ArmStatus`, `BinContents`, `OrderLine`; srvs: `SubmitJob`, `CancelJob`, `ConfirmReceipt`, `ConfirmReturn`, `ResetFault` |
 | `apex_orchestrator` | job state machine node, loop router, pose/route YAML loader |
 | `apex_plc_bridge` | `pycomm3` tag client with write allow-list; a sim backend talking to `apex_cell_sim` |
+| `apex_payload` | runs on the TurtleBot Pi: lift and tilt actuators, limit switches, `SetLift` / `TiltDump` actions, `PayloadStatus`, watchdog |
 | `apex_cell_sim` | imitation GuardLogix + KUKA + conveyor + transfer (same tags, timing from YAML, fault injection), timed part spawn into the bin in Gazebo |
 | `apex_bringup` | launch files, Gazebo world (FlexBase 72 × 40 in, loop corridors, two stations, dock, conveyor, transfer station, chute, obstacle models), map, pose YAML, network profiles |
 
