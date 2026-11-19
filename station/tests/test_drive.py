@@ -12,7 +12,7 @@ from apex_station.sensors.feed import (
     map_to_cell,
     occupancy_gray,
 )
-from apex_station.sensors.mapping import MappingSession, safe_name, save_command, slam_command
+from apex_station.sensors.mapping import MappingSession, safe_name, save_command, serialize_command, slam_command
 
 
 def test_keys_to_command():
@@ -57,7 +57,11 @@ def test_occupancy_gray_and_cells():
 
 
 def test_mapping_commands(tmp_path):
-    assert slam_command() == ["ros2", "launch", "turtlebot4_navigation", "slam.launch.py"]
+    cmd = slam_command()
+    assert cmd[:5] == ["ros2", "launch", "turtlebot4_navigation", "slam.launch.py", "sync:=false"]
+    assert cmd[5].startswith("params:=") and cmd[5].endswith("apex_mapping/config/slam.yaml")
+    assert slam_command(None) == cmd[:5]
+    assert serialize_command(tmp_path / "m")[-1] == f"{{filename: '{tmp_path / 'm'}'}}"
     cmd = save_command(tmp_path / "lab_real")
     assert cmd[:4] == ["ros2", "run", "nav2_map_server", "map_saver_cli"] and str(tmp_path / "lab_real") in cmd
     assert safe_name("lab real/../x") == "lab_real____x" and safe_name("  ") == "lab_real"

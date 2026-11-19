@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>apex_mapping</name>
+  <version>0.1.0</version>
+  <description>LiDAR mapping of the APEx lab on the real TurtleBot 4: slam_toolbox settings and the
+    on-robot mapping run (SLAM + raw bag + pose graph). Adapted from aidanjmartin/tourbot - see NOTICE.md.</description>
+  <maintainer email="apex@example.com">APEx Systems team</maintainer>
+  <license>LicenseRef-TourBot (see NOTICE.md)</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>turtlebot4_navigation</exec_depend>
+  <exec_depend>slam_toolbox</exec_depend>
+  <exec_depend>nav2_map_server</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>irobot_create_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>ros2bag</exec_depend>
+  <exec_depend>rosbag2_storage_mcap</exec_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>
