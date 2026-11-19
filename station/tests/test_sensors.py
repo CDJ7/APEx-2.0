@@ -86,6 +86,26 @@ def _sample_feed(clock_offset=0.0) -> StaticSensorFeed:
     return StaticSensorFeed(scan=scan, image=img, scan_hz=8.6, image_hz=19.0)
 
 
+_made: list = []
+
+
+@pytest.fixture(autouse=True)
+def _delete_qt_objects():
+    """Delete pages and bridges after each test: Qt objects left for interpreter shutdown abort PySide."""
+    yield
+    if not _made:
+        return
+    from PySide6.QtCore import QCoreApplication, QEvent, QThreadPool
+    QThreadPool.globalInstance().waitForDone(2000)
+    for obj in _made:
+        if hasattr(obj, "_timer"):
+            obj._timer.stop()
+            obj.hide()
+        obj.deleteLater()
+    _made.clear()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+
 def _page(sim, feed):
     from apex_station.ui.bridge import QtBridge
     from apex_station.ui.pages.base import AppContext
@@ -96,8 +116,11 @@ def _page(sim, feed):
         def show(self, level, text):
             toasts.append((level, text))
 
-    ctx = AppContext(cfg=sim.core.cfg, core=sim.core, bridge=QtBridge(sim.core.bus), toasts=Toasts(), sensors=feed)
-    return SensorsPage(ctx), toasts
+    bridge = QtBridge(sim.core.bus)
+    ctx = AppContext(cfg=sim.core.cfg, core=sim.core, bridge=bridge, toasts=Toasts(), sensors=feed)
+    page = SensorsPage(ctx)
+    _made.extend([page, bridge])
+    return page, toasts
 
 
 def test_sensors_page_shows_live_data(qapp, sim):
