@@ -369,6 +369,12 @@ networks". **Use Discovery Server in both profiles:**
   manual's *User PC* setup.
 - `ROS_DOMAIN_ID` is fixed per profile.
 
+**Current state (2026-11-18):** on our own router the robot runs **Simple
+Discovery** with `ROS_DOMAIN_ID=0`, and the laptop sees every topic. Multicast
+works there because the router is ours. The discovery server is still the plan
+for any shared network. Setup, time sync and recovery:
+[`TURTLEBOT_NETWORK.md`](TURTLEBOT_NETWORK.md).
+
 ### 7.2 School Wi-Fi (now)
 
 - Only the TurtleBot's Raspberry Pi joins the school Wi-Fi, for internet and
