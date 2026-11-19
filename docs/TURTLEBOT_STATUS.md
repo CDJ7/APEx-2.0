@@ -17,7 +17,7 @@ should drive the loop at least as well as Nav2.
 | Area | What exists | Where |
 |---|---|---|
 | Real robot on the lab network | Netgear router, robot `192.168.0.3` on 5 GHz, laptop wired, time sync chain, SSH, dock power saver off | `docs/TURTLEBOT_NETWORK.md` |
-| Manual driving | W A S D keyboard teleop from the laptop | `station/tools/teleop_wasd.py` |
+| Manual driving | W A S D on the station GUI's Drive & Map page (stops on key release); terminal fallback | `station/apex_station/ui/pages/drive.py`, `station/tools/teleop_wasd.py` |
 | Live sensors in the HMI | lidar plot + camera at 10 fps, clock offset check | station *Sensors* page |
 | Lab model | single `lab.yaml` → Gazebo worlds, Nav2 map, keepout mask, layout figure; now with the direct chute, funnel and return bin | `ros2_ws/src/apex_bringup` |
 | Job logic | job state machine with timeouts and faults, two-direction routing with remembered blockages, shortfall handling, tray dump + interlock | `apex_orchestrator` (66 workspace tests) |
@@ -48,7 +48,7 @@ Ordered roughly by when the work can start. Each row says what blocks it and whe
 | # | Task | Done when | Notes |
 |---|---|---|---|
 | M1 | Measure the room, FlexBase position, chute/funnel position, return bin, stations, dock outlet; update `lab.yaml` | `generate_lab.py` + `draw_lab_layout.py` re-run, tests pass | Q-L1…Q-L5; the room must fit 5.63 × 4.66 m or the corridors shrink |
-| M2 | Record a SLAM map: `ros2 launch turtlebot4_navigation slam.launch.py`, drive with teleop, `map_saver_cli` | map saved (git-ignored or in `apex_bringup/maps/`) | needs the robot clock synced (Sensors page *Clock offset*) |
+| M2 | Record a SLAM map: station GUI **Drive & Map** page (Start mapping, drive with W A S D, Save map), or by hand: `ros2 launch turtlebot4_navigation slam.launch.py`, teleop, `map_saver_cli` | map saved (git-ignored or in `apex_bringup/maps/`) | needs the robot clock synced (Sensors page *Clock offset*) |
 | M3 | Align the SLAM map to the `lab.yaml` frame (origin at the FlexBase centre), or re-measure the poses in the map frame | the generated map and the SLAM map overlap | the generated map is the check that `lab.yaml` is right |
 | M4 | Mark the island as keepout in Nav2 (costmap filter with `maps/apex_lab_keepout.yaml`) | Nav2 never plans through the island | the mask is generated but **not wired into the launch files yet**; it is only guidance, not a safety function (RA-11) |
 

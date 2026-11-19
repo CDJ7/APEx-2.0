@@ -19,6 +19,7 @@ from apex_station.ui import theme
 from apex_station.ui.bridge import run_in_background
 from apex_station.ui.pages.base import AppContext, Page
 from apex_station.ui.pages.dashboard import DashboardPage
+from apex_station.ui.pages.drive import DrivePage
 from apex_station.ui.pages.inventory import InventoryPage
 from apex_station.ui.pages.logs import LogsPage
 from apex_station.ui.pages.orders import OrdersPage
@@ -28,7 +29,7 @@ from apex_station.ui.pages.robot import RobotCellPage
 from apex_station.ui.pages.sensors import STALE_S, SensorsPage
 from apex_station.ui.widgets import LedLabel, ToastManager, button, confirm, error
 
-NAV = ["Dashboard", "Orders", "Receiving", "Robot & Cell", "Sensors", "Inventory", "Quarantine", "Logs"]
+NAV = ["Dashboard", "Orders", "Receiving", "Robot & Cell", "Sensors", "Drive & Map", "Inventory", "Quarantine", "Logs"]
 
 
 class MainWindow(QMainWindow):
@@ -64,7 +65,8 @@ class MainWindow(QMainWindow):
         sl.addSpacing(26)
         open_receiving = lambda: self.show_page(NAV.index("Receiving"))  # noqa: E731
         pages: list[Page] = [DashboardPage(self.ctx, open_receiving), OrdersPage(self.ctx), ReceivingPage(self.ctx),
-                             RobotCellPage(self.ctx, open_receiving), SensorsPage(self.ctx), InventoryPage(self.ctx),
+                             RobotCellPage(self.ctx, open_receiving), SensorsPage(self.ctx), DrivePage(self.ctx),
+                             InventoryPage(self.ctx),
                              QuarantinePage(self.ctx), LogsPage(self.ctx)]
         self.stack = QStackedWidget()
         self.group = QButtonGroup(self)
@@ -187,6 +189,11 @@ class MainWindow(QMainWindow):
         self.sb_msg.setText(f"{time.strftime('%H:%M:%S')}  {text}")
 
     def _stop(self) -> None:
+        drive = next((p for p in self.pages if hasattr(p, "stop_now")), None)
+        if drive is not None:                       # manual driving (Drive & Map) stops too
+            drive.stop_now()
+        elif self.ctx.sensors is not None:
+            self.ctx.sensors.stop_drive()
         run_in_background(lambda: self.ctx.core.operator_command("stop", self.ctx.operator),
                           lambda _r: self.toasts.show("error", "STOP sent - job halted"),
                           lambda msg: error(self, "STOP NOT CONFIRMED", msg + "\n\nUse the hardware E-stop if "

@@ -84,6 +84,7 @@ troubleshooting. The sensor feed is independent of the job link and needs no orc
 | **Orders** | *New order*: pick parts (only parts with a PLC part code - i.e. stored in the FlexBase), quantities, destination, priority; stock is reserved at once. *Orders & jobs*: every order with status, job id, lines (ordered / not loaded / OK / damaged / missing) and the full job timeline from the orchestrator; approve / cancel |
 | **Receiving** | The worker's condition report at the station: OK + damaged + missing must equal what was **loaded** for each line. Confirming sends the receipt to the orchestrator (the robot may leave) and then books it. A second confirmation asks that hands are out of the bin (RA-10) |
 | **Robot & Cell** | Live map, job step with chute count, queue and fault text, **STOP / Reset / Resume**, TurtleBot battery / dock / pose, **return-tray state + Tray flat button**, the read-only FlexBase + KUKA summary, simulation panel (built-in simulation only: cell faults, tray jam, corridor barriers) |
+| **Drive & Map** | Manual driving of the real TurtleBot with **W A S D** (hold to drive, release = stop; off until *Driving enabled*; blocked while a job runs) and **SLAM mapping**: Start mapping (slam_toolbox on this computer), live map with the robot's pose, Save map (`~/apex_maps/<name>.yaml/.pgm`), Stop mapping. Camera and lidar alongside. See `docs/TURTLEBOT_NETWORK.md` |
 | **Sensors** | Read-only live view of the real TurtleBot (`--sensors ros`): OAK-D RGB preview and a top-down lidar plot (front up, range rings), with rate, age, **clock offset** (flags a wrong robot clock), point count and nearest obstacle. **Start lidar / Start camera** buttons (the robot stops both on the dock); nothing here moves the robot |
 | **Inventory** | Parts master data: slot, **PLC part code** (selects the KRL pick program; 0 = not in the cell), on hand, quarantine, reorder threshold; add / edit / audited stock adjustment / delete; CSV import & export |
 | **Quarantine** | Discrepancies - *Damaged*, *Missing* (at delivery), *NotLoaded* (chute short count), *ReturnMismatch* - resolved with a note; not-loaded / missing parts that turn up can be restocked. Quarantine stock (damaged units, never restocked) with disposal |
@@ -215,7 +216,8 @@ station/
 │   │   └── ros_link.py      ROS 2 client of apex_orchestrator / apex_plc_bridge
 │   ├── sensors/
 │   │   ├── feed.py          sensor frames, scan geometry, rate meter, "off" + sample feeds (no Qt, no ROS)
-│   │   └── ros_feed.py      ROS 2 subscriber for /scan + camera (own rclpy context and thread)
+│   │   ├── ros_feed.py      ROS 2 node: /scan, camera, /map + pose, /cmd_vel (own rclpy context and thread)
+│   │   └── mapping.py       start / stop slam_toolbox, save the map (map_saver_cli)
 │   ├── net/rest_api.py      FastAPI for the workstation laptop
 │   └── ui/                  theme, widgets, bridge, map_view, actions, main_window, pages/*
 ├── config/station.yaml
@@ -229,7 +231,7 @@ station/
 ## 8. Tests
 
 ```bash
-python -m pytest station/tests -q        # 34 tests, ~10 s; GUI tests run offscreen
+python -m pytest station/tests -q        # 42 tests, ~10 s; GUI tests run offscreen
 ```
 
 * `test_station_flow.py` - full order, receipt rules, damaged return to quarantine, shortfall
@@ -238,6 +240,8 @@ python -m pytest station/tests -q        # 34 tests, ~10 s; GUI tests run offscr
 * `test_gui.py` - every page builds; receiving page closes an order; Robot & Cell shows a fault.
 * `test_sensors.py` - scan geometry and lidar mount yaw, rate meter, config modes; the Sensors
   page with sample data (live values, wrong-clock warning, no-feed notice, start buttons).
+* `test_drive.py` - keys -> velocity, the deadman gate, map rendering and zoom, mapping commands;
+  the Drive & Map page drives only when enabled, stops on release / Space / focus loss / hide.
 * `test_teleop_wasd.py` - keyboard teleop: key directions, hold-to-drive stop, space/Esc, speed limits.
 * `test_ros_link.py` - the station's ROS link against the **real** orchestrator and PLC-bridge
   nodes (rclpy stand-in from `ros2_ws/tests/ros_fakes.py`, real cell simulator over TCP).

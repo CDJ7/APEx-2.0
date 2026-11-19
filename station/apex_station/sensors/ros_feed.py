@@ -1,4 +1,4 @@
-"""ROS 2 sensor feed: the TurtleBot 4's lidar and OAK-D camera for the Sensors page.
+"""ROS 2 feed: the TurtleBot 4's lidar, OAK-D camera, SLAM map, pose and manual driving.
 
 Subscribes (best-effort, sensor-data QoS) to the scan and image topics and to ``/tf_static``
 (only to learn how the lidar is mounted). Keeps the **latest** frame of each; the GUI polls
@@ -9,6 +9,13 @@ Bandwidth: the camera is subscribed only while the Sensors page is open
 (:meth:`set_camera_enabled`). Raw 250x250 frames at 30 fps (~45 Mbit/s) saturate the robot's
 Wi-Fi and stall everything else (SSH, services); the robot's camera runs at 10 fps for this
 reason (docs/TURTLEBOT_NETWORK.md).
+
+Mapping: ``/map`` (nav_msgs/OccupancyGrid, transient-local) and the robot pose in it from TF
+(``map -> base_link``, available while slam_toolbox or AMCL runs).
+
+Driving: ``drive(linear, angular)`` feeds a :class:`~apex_station.sensors.feed.DriveGate`; a
+20 Hz timer on the feed's thread publishes ``geometry_msgs/TwistStamped`` on ``/cmd_vel`` only
+while the GUI keeps refreshing the command, then zero, then nothing.
 
 Requests: ``start_lidar`` (``/start_motor``, std_srvs/Empty) and ``start_camera``
 (``/oakd/start_camera``, std_srvs/Trigger). The TurtleBot 4 stops both sensors while docked
@@ -26,7 +33,8 @@ import threading
 import time
 
 from apex_station.sensors.feed import (
-    ImageFrame, RateMeter, ScanFrame, SensorError, SensorFeed, SensorSnapshot, planar_yaw, quat_yaw,
+    CameraOwners, DriveGate, ImageFrame, MapFrame, Pose2D, RateMeter, ScanFrame, SensorError, SensorFeed,
+    SensorSnapshot, planar_yaw, quat_yaw,
 )
 
 log = logging.getLogger("station.sensors")
@@ -36,20 +44,35 @@ def _stamp(header) -> float:
     return header.stamp.sec + header.stamp.nanosec * 1e-9
 
 
+def _int8_bytes(data) -> bytes:
+    try:
+        return data.tobytes()                      # array('b'): -1 -> 0xff
+    except AttributeError:
+        return bytes(v & 0xFF for v in data)
+
+
 class RosSensorFeed(SensorFeed):
     mode = "ros"
+    can_drive = True
 
     def __init__(self, scan_topic: str = "/scan", image_topic: str = "/oakd/rgb/preview/image_raw",
                  lidar_service: str = "/start_motor", camera_service: str = "/oakd/start_camera",
                  base_frame: str = "base_link", lidar_yaw_deg: float = 90.0, timeout_s: float = 5.0,
-                 node_name: str = "apex_station_sensors"):
+                 node_name: str = "apex_station_sensors", cmd_topic: str = "/cmd_vel",
+                 map_topic: str = "/map", map_frame: str = "map"):
         self.scan_topic, self.image_topic = scan_topic, image_topic
         self.lidar_service, self.camera_service = lidar_service, camera_service
         self.base_frame = base_frame
         self.default_yaw = math.radians(lidar_yaw_deg)
         self.timeout_s = timeout_s
         self.node_name = node_name
+        self.cmd_topic, self.map_topic, self.map_frame = cmd_topic, map_topic, map_frame
         self._lock = threading.Lock()
+        self._gate = DriveGate()
+        self._camera = CameraOwners()
+        self._map: MapFrame | None = None
+        self._pose: Pose2D | None = None
+        self._cmd_pub = self._tf_buffer = None
         self._scan: ScanFrame | None = None
         self._image: ImageFrame | None = None
         self._scan_rate, self._image_rate = RateMeter(), RateMeter()
@@ -69,7 +92,10 @@ class RosSensorFeed(SensorFeed):
             from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
             from sensor_msgs.msg import Image, LaserScan
             from std_srvs.srv import Empty, Trigger
+            from geometry_msgs.msg import TwistStamped
+            from nav_msgs.msg import OccupancyGrid
             from tf2_msgs.msg import TFMessage
+            from tf2_ros import Buffer, TransformListener
         except ImportError as exc:
             self._error = f"ROS 2 not available ({exc}) - run 'source /opt/ros/jazzy/setup.bash' first"
             log.error("sensor feed disabled: %s", self._error)
@@ -85,6 +111,15 @@ class RosSensorFeed(SensorFeed):
         n.create_subscription(TFMessage, "/tf_static", self._on_tf_static,
                               QoSProfile(depth=100, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                                          reliability=ReliabilityPolicy.RELIABLE))
+        n.create_subscription(OccupancyGrid, self.map_topic, self._on_map,
+                              QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                                         reliability=ReliabilityPolicy.RELIABLE))
+        self._tf_buffer = Buffer()
+        self._tf_listener = TransformListener(self._tf_buffer, n, spin_thread=False)
+        n.create_timer(0.2, self._update_pose)
+        self._twist_type = TwistStamped
+        self._cmd_pub = n.create_publisher(TwistStamped, self.cmd_topic, 10)
+        n.create_timer(0.05, self._publish_drive)
         self._clients = {"lidar": (n.create_client(Empty, self.lidar_service), Empty),
                          "camera": (n.create_client(Trigger, self.camera_service), Trigger)}
         self._executor = SingleThreadedExecutor(context=self._ctx)
@@ -93,8 +128,8 @@ class RosSensorFeed(SensorFeed):
         self._thread.start()
         log.info("sensor feed started: %s, %s", self.scan_topic, self.image_topic)
 
-    def set_camera_enabled(self, enabled: bool) -> None:
-        self._want_camera = enabled          # applied on the spin thread
+    def set_camera_enabled(self, enabled: bool, owner: str = "sensors") -> None:
+        self._want_camera = self._camera.update(owner, enabled)    # applied on the spin thread
 
     def _sync_camera(self) -> None:
         if self._want_camera and self._image_sub is None:
@@ -117,6 +152,10 @@ class RosSensorFeed(SensorFeed):
                 time.sleep(0.5)
 
     def stop(self) -> None:
+        if self._cmd_pub is not None:            # last word to the robot: stop
+            for _ in range(3):
+                self._send_twist(0.0, 0.0)
+                time.sleep(0.02)
         self._stop.set()
         if self._thread:
             self._thread.join(timeout=2.0)
@@ -144,6 +183,41 @@ class RosSensorFeed(SensorFeed):
             self._image = f
             self._image_rate.tick(now)
 
+    def _on_map(self, m) -> None:
+        o = m.info.origin.position
+        f = MapFrame(time.time(), m.info.width, m.info.height, m.info.resolution, o.x, o.y, _int8_bytes(m.data))
+        with self._lock:
+            self._map = f
+
+    def _update_pose(self) -> None:
+        try:
+            import rclpy.time
+            t = self._tf_buffer.lookup_transform(self.map_frame, self.base_frame, rclpy.time.Time())
+        except Exception:  # noqa: BLE001 - no map frame yet (SLAM not running)
+            return
+        q, p = t.transform.rotation, t.transform.translation
+        with self._lock:
+            self._pose = Pose2D(p.x, p.y, quat_yaw(q.x, q.y, q.z, q.w), time.time())
+
+    # ------------------------------------------------------------------ driving
+    def _send_twist(self, linear: float, angular: float) -> None:
+        m = self._twist_type()
+        m.header.stamp = self._node.get_clock().now().to_msg()
+        m.header.frame_id = self.base_frame
+        m.twist.linear.x, m.twist.angular.z = float(linear), float(angular)
+        self._cmd_pub.publish(m)
+
+    def _publish_drive(self) -> None:
+        out = self._gate.output(time.monotonic())
+        if out is not None:
+            self._send_twist(*out)
+
+    def drive(self, linear: float, angular: float) -> None:
+        self._gate.set(linear, angular, time.monotonic())
+
+    def stop_drive(self) -> None:
+        self._gate.stop(time.monotonic())
+
     def _on_tf_static(self, m) -> None:
         with self._lock:
             for t in m.transforms:
@@ -159,7 +233,9 @@ class RosSensorFeed(SensorFeed):
             return SensorSnapshot(mode=self.mode, scan=scan, image=image, scan_hz=self._scan_rate.rate(now),
                                   image_hz=self._image_rate.rate(now),
                                   lidar_yaw=self.default_yaw if yaw is None else yaw,
-                                  lidar_yaw_source="config" if yaw is None else "tf", error=self._error)
+                                  lidar_yaw_source="config" if yaw is None else "tf", error=self._error,
+                                  map=self._map, pose=self._pose,
+                                  cmd_listeners=self._cmd_pub.get_subscription_count() if self._cmd_pub else 0)
 
     def _call(self, which: str) -> str:
         if self._node is None:
