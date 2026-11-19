@@ -100,7 +100,7 @@ Diagram and details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 | **Automation NTH FlexBase, 6 ft** | 72" × 40" (1.83 × 1.02 m), max height 7'6". Compact GuardLogix 5380, 1734 POINT I/O, PLd safety circuit, managed Ethernet switch, IFM IO-Link master, SMC EtherNet/IP valve bank, 3-segment stack light, optional Quickdraw conveyor with stop stations | FlexBase brochure |
 | **TurtleBot 4 (standard)** | Create® 3 base, Raspberry Pi 4B, RPLIDAR A1M8, OAK-D Pro, display. 342 × 339 × 351 mm, 3.9 kg, **max payload 9 kg**, 0.31 m/s (safe mode), 2.5–4 h runtime. Top plate 270 × 250 mm acrylic, 4 × M4 | TurtleBot 4 user manual, hardware repo |
 | **Transfer: arm → chute** (to design) | The KUKA picks from a **shelf inside the FlexBase** and places each part on a padded **chute** that passes through an opening in the guarding glass to the TurtleBot's tray. A photoeye counts every part. No conveyor in the transfer. | Team decision 2026-11-19 |
-| **TurtleBot payload** (to design) | Tray with a **tilt actuator** to dump damaged parts, own 12 V battery, about **3 kg** of parts per trip; lift optional. See [`BIN_FIXTURE.md`](docs/BIN_FIXTURE.md). | Team decision 2026-11-19 |
+| **TurtleBot payload** (to design) | 3D-printed **two-section tray**: fixed good section, **servo-tilted bad section** to dump damaged parts; Arduino control, 5 V from a TurtleBot USB-C port; about **3 kg** of parts per trip; lift optional. See [`BIN_FIXTURE.md`](docs/BIN_FIXTURE.md). | Team decision 2026-11-19 |
 
 Manuals are kept locally (copyright); see [`docs/manuals/README.md`](docs/manuals/README.md).
 
@@ -203,6 +203,6 @@ Current working assumptions, each listed in
 - **Ubuntu 24.04** station PC, with a Windows laptop for Studio 5000 and WorkVisual.
 - **Arm-to-chute transfer** (decided): the KUKA places parts from a shelf onto a chute through the guarding; no conveyor, pusher or pallets in the transfer.
 - **Fixed-height tray, no lift** (proposed): the chute outlet is built to the TurtleBot tray height.
-- The TurtleBot **tilts its tray to dump damaged parts** into a quarantine bin by itself.
+- The TurtleBot **tilts the bad section of its tray** to dump damaged parts into a quarantine bin by itself.
 - **CIP Safety** to the KUKA if the option is installed, otherwise X11.
 - One TurtleBot.

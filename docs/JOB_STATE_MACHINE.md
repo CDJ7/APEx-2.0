@@ -9,9 +9,10 @@ One **job** = one order = one TurtleBot trip:
 **pickup** (arm → chute → tray) → **delivery** → **return** (only if damaged
 parts came back) → **finish**.
 
-The TurtleBot carries a **tilting tray** (`BIN_FIXTURE.md`). It is tilted
-only at `return_drop`, where the robot **dumps damaged parts itself** into
-the quarantine bin. A lift under the tray is **optional**
+The TurtleBot carries a **two-section tray** (`BIN_FIXTURE.md`): the chute
+fills the fixed **good** section; at the station the worker puts damaged
+parts in the **bad** section, which a servo tilts only at `return_drop` to
+dump them into the quarantine bin. A lift under the tray is **optional**
 (`payload.lift_fitted`, default `false`); without one, `LIFT_RAISE` and
 `LIFT_LOWER` pass straight through. **No Nav2 goal is ever sent unless the
 tray is stowed** (`tilt_home`, and `lift_down` if a lift is fitted).
@@ -52,7 +53,7 @@ stateDiagram-v2
 
     state Return {
         DEPART_STATION --> NAV_TO_RETURN: damaged > 0
-        NAV_TO_RETURN --> TILT_DUMP: at return_drop (tray beside quarantine bin)
+        NAV_TO_RETURN --> TILT_DUMP: at return_drop (bad section beside quarantine bin)
         TILT_DUMP --> TILT_HOME: tilted, dwell elapsed
         TILT_HOME --> FINISH: tilt_home
     }
@@ -101,9 +102,9 @@ stateDiagram-v2
 | P7d | `LIFT_LOWER` (only if a lift is fitted) | `SetLift(0)` | `LIFT_DOWN` switch made | `T_lift` = 15 s | `FAULT: LIFT_FAILED` (robot does **not** drive) |
 | P8 | `LOAD_VERIFY` | compare `Chute_PartCount` with the ordered total | equal | — | **shortfall**: pause; GUI asks the operator to *retry missing parts*, *send with shortfall* (lines become **NOT LOADED**) or *cancel* |
 | D1 | `NAV_TO_STATION` | route to `station_a` / `station_b`, shorter clear direction | Nav2 succeeded | `T_nav_leg` | reroute once the other way (`REROUTE`); both blocked → `FAULT: NAV_BLOCKED` |
-| D2 | `AWAIT_RECEIPT` | GUI/REST prompt at the station | receipt confirmed: every line OK + damaged + missing = loaded qty | `T_receipt_remind` = 300 s (reminder, stack-light/GUI alert); `T_receipt_max` = 1800 s | after max: `FAULT: NO_RECEIPT` (robot stays parked, does not leave with parts) |
+| D2 | `AWAIT_RECEIPT` | GUI/REST prompt at the station; worker takes OK parts and puts damaged ones in the bad section | receipt confirmed: every line OK + damaged + missing = loaded qty | `T_receipt_remind` = 300 s (reminder, stack-light/GUI alert); `T_receipt_max` = 1800 s | after max: `FAULT: NO_RECEIPT` (robot stays parked, does not leave with parts) |
 | R1 | `NAV_TO_RETURN` | route to `return_drop` | Nav2 succeeded | `T_nav_leg` | reroute / `FAULT: NAV_BLOCKED` |
-| R2 | `TILT_DUMP` | `TiltDump()` to `tilt_dump_deg` (40–45°), hold `T_dump_dwell` = 3 s | tilted and dwell elapsed | `T_tilt` = 10 s | `FAULT: TILT_FAILED` |
+| R2 | `TILT_DUMP` | `TiltDump()`: servo tilts the **bad section only** to `tilt_dump_deg` (40–45°), hold `T_dump_dwell` = 3 s | tilted and dwell elapsed | `T_tilt` = 10 s | `FAULT: TILT_FAILED` |
 | R3 | `TILT_HOME` | tilt back level | `TILT_HOME` switch made | `T_tilt` = 10 s | `FAULT: TILT_FAILED` (robot does **not** drive) |
 | F1 | `FINISH` | book inventory (below), release job | — | — | — |
 | F2 | `NAV_TO_DOCK` | route to the dock staging pose, then `dock()` | `DockStatus.is_docked` | `T_dock` = 120 s, 2 retries | `FAULT: DOCK_FAILED` |
@@ -151,7 +152,7 @@ route(target):
 | Order submitted | ordered qty **reserved** (on-hand − qty) |
 | Part not loaded (short count, operator sends with shortfall) | reserved qty returned to on-hand **if the PLC reports the part was never picked**; if the arm placed it on the chute but the photoeye did not count it, it becomes a **lost-in-transfer** discrepancy for an operator to check (**[CONFIRM]** this rule) |
 | Receipt: OK | consumed (delivered) |
-| Receipt: damaged | stays on the tray; after `TILT_HOME` at `return_drop` → **quarantine** count (never restocked). Booked from the receipt quantity unless a quarantine-bin counter is fitted (`BIN_FIXTURE.md` Q-B4). |
+| Receipt: damaged | worker puts it in the tray's bad section; after `TILT_HOME` at `return_drop` → **quarantine** count (never restocked). Booked from the receipt quantity unless a quarantine-bin counter is fitted (`BIN_FIXTURE.md` Q-B4). |
 | Receipt: missing | **discrepancy** (missing at delivery), no stock change |
 | Quarantine-bin count ≠ damaged qty (only if a counter is fitted, or at an operator's periodic quarantine check) | difference logged as a discrepancy |
 | Job cancelled before loading | reservation released |
@@ -161,7 +162,7 @@ route(target):
 - Robot parking under the chute: pinch/crush points between chute, bin and robot; falling parts.
 - Chute opening in the guarding next to where the arm places parts: no reach-through to the arm (RA-01).
 - Chute outlet over the tray: pinch point between the chute and the tray (and the raised tray, if a lift is fitted); parts dropping.
-- Tray tilt at `return_drop`: pinch at the hinge; parts falling into the quarantine bin; nobody reaching in while tilting.
+- Bad-section tilt at `return_drop`: pinch at the hinge; parts falling into the quarantine bin; nobody reaching in while tilting.
 - Robot driving with the tray tilted (or raised): tipping, so the motion interlock is required.
 - Worker reaching into the delivery bin at a station: same, during `AWAIT_RECEIPT`.
 - Fault recovery: no automatic restart; Resume needs an operator.

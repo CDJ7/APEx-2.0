@@ -76,10 +76,10 @@ See [`BIN_FIXTURE.md`](BIN_FIXTURE.md) §9.
 |---|---|---|
 | Q-B1 | Where the chute passes through the guarding, and the chute inlet height where the arm places parts. | East end; height set by the team's chute design. |
 | Q-B2 | Largest part, parts per trip, and the **volume** of a 3 kg load. | Tray ~1.8 L may be too small; measure a real load. |
-| Q-B3 | Quarantine bin at `return_drop`: size, height, which side of the robot. | Beside the robot; the tilt direction follows from it. |
+| Q-B3 | Quarantine bin at `return_drop`: size, height, which side of the robot. | Beside the robot, on the bad section's side. |
 | Q-B4 | How the dumped count is checked. | Booked from the receipt; optional break-beam counter on the bin inlet. |
-| Q-B5 | Fixed-height tray (no lift) or keep a lift? | **Fixed height, no lift** (chute outlet built to the tray height). |
-| Q-B6 | Final actuator, driver and battery models. | 12 V tilt actuator with feedback, ~150–200 N (e.g. Actuonix L16/P16 class), separate 12 V pack; pick after a prototype. |
+| Q-B5 | Is a lift needed? | **No**, chute outlet built to the tray height; decide after testing. |
+| Q-B6 | Final servo, actuator and Arduino models; UI board revision. | 20–25 kg·cm metal-gear servo (4.8–6.8 V); optional Actuonix L16-R 6 V; Arduino Nano or the old Uno R4; USB-C port 4 on a REV 2 board. |
 | Q-B7 | Shelf layout in the FlexBase: part types and positions (taught pick positions). | — |
 
 ## Answered
@@ -98,3 +98,4 @@ See [`BIN_FIXTURE.md`](BIN_FIXTURE.md) §9.
 | A-10 | The **robot dumps damaged parts itself** by tilting its tray at `return_drop` (replaces the old Q-X2 assumption that an operator empties a return bin). | 2026-11-19 |
 | A-11 | About **3 kg of parts** per trip (rough estimate). | 2026-11-19 |
 | A-12 | **No conveyor in the transfer:** the KUKA picks each part from a **shelf inside the FlexBase** and places it on a **chute** through the guarding glass; the part slides onto the TurtleBot's tray. Answers Q-S5 and Q-S6 (no pusher, no pallets). | 2026-11-19 |
+| A-13 | **Two-section tray:** fixed good section filled by the chute, servo-tilted bad section for damaged parts; optional linear-actuator lift; Arduino control; power from a TurtleBot USB-C port; 3D-printed fixture. | 2026-11-19 |

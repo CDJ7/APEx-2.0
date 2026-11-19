@@ -39,7 +39,7 @@ flowchart LR
         subgraph TB["TurtleBot 4 (standard)"]
             NAV["Nav2 + AMCL on saved map<br/>named poses · docking"]
             C3["Create 3 base<br/>motors · hazards · dock · battery"]
-            BIN["Payload: tilting tray<br/>own 12 V battery (apex_payload)"]
+            BIN["Payload: two-section tray<br/>servo-tilted bad section<br/>Arduino + apex_payload"]
         end
         subgraph CELL["FlexBase 6 ft cell (guarded)"]
             PLC["Compact GuardLogix 5380<br/>standard task: handshake, chute count,<br/>KUKA program select<br/>safety task: PLd circuit (read-only to us)"]
@@ -250,10 +250,12 @@ point of control* principle and needs its own risk assessment. **⚠ RA**
   Create® 3 `Dock` / `Undock` actions (`irobot_create_msgs`), which use the
   dock's IR beacons. Dock state comes from the `DockStatus` topic, battery
   from `/battery_state`.
-- **Payload module** (`BIN_FIXTURE.md`): a lift + tilt tray on the top
-  plate, powered by its **own 12 V battery** (the TurtleBot's user power pins
-  give only 300 mA). Driven by `apex_payload` on the Pi. **Nav2 goals are only
-  sent with the tray down and level.** **⚠ RA**
+- **Payload module** (`BIN_FIXTURE.md`): a 3D-printed two-section tray on
+  the top plate: a fixed **good** section and a servo-tilted **bad** section
+  (optional lift). An **Arduino** drives the servo, takes commands from
+  `apex_payload` on the Pi over USB serial, and the motors run on 5 V from a
+  UI-board USB-C port within its 3 A limit. **Nav2 goals are only sent with
+  the tray stowed.** **⚠ RA**
 - Nav2 **keepout zones** (costmap filter) mark the FlexBase island and service
   clearance so the planner never routes through them. This is a planning aid,
   **not a safety function**: the safety argument is that the arm's danger
@@ -285,7 +287,7 @@ point of control* principle and needs its own risk assessment. **⚠ RA**
 | `apex_interfaces` | msgs: `JobStatus`, `RobotStatus`, `CellStatus`, `ArmStatus`, `BinContents`, `OrderLine`; srvs: `SubmitJob`, `CancelJob`, `ConfirmReceipt`, `ConfirmReturn`, `ResetFault` |
 | `apex_orchestrator` | job state machine node, loop router, pose/route YAML loader |
 | `apex_plc_bridge` | `pycomm3` tag client with write allow-list; a sim backend talking to `apex_cell_sim` |
-| `apex_payload` | runs on the TurtleBot Pi: lift and tilt actuators, limit switches, `SetLift` / `TiltDump` actions, `PayloadStatus`, watchdog |
+| `apex_payload` | runs on the TurtleBot Pi: talks to the payload Arduino over USB serial (bad-section servo, optional lift, limit switches); `TiltDump` / `SetLift` actions, `PayloadStatus`, watchdog |
 | `apex_cell_sim` | imitation GuardLogix + KUKA + chute (same tags, timing from YAML, fault injection), timed part spawn into the tray in Gazebo |
 | `apex_bringup` | launch files, Gazebo world (FlexBase 72 × 40 in, parts shelf, chute, loop corridors, two stations, quarantine bin, dock, obstacle models), map, pose YAML, network profiles |
 
