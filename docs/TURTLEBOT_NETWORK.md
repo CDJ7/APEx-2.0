@@ -194,6 +194,8 @@ python3 ~/APEx-2.0/station/tools/teleop_wasd.py        # add --dry-run to try th
 
 A lidar map of the room for Nav2, recorded with **slam_toolbox** running on the laptop (the
 robot's Pi is too slow for it). The task is M2 in [`TURTLEBOT_STATUS.md`](TURTLEBOT_STATUS.md).
+The full checklist, with driving pattern, checking and fixing the map, is in the
+[README](../README.md#mapping-the-lab-with-the-real-turtlebot). The short version:
 
 1. Check *Clock offset* on the Sensors page is under 1 s. SLAM combines the robot's odometry
    and the laptop's processing, so the clocks must agree.
