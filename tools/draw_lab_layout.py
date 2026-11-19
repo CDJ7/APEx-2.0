@@ -2,7 +2,7 @@
 
 Every number comes from ros2_ws/src/apex_bringup/config/lab.yaml (the same file that
 generates the Gazebo worlds and Nav2 maps), so the figure cannot drift from the simulation.
-Map frame: origin at the FlexBase centre, +x along the 72" length toward the conveyor exit, metres.
+Map frame: origin at the FlexBase centre, +x along the 72" length toward the chute (east end), metres.
 Run:  python tools/draw_lab_layout.py
 """
 
@@ -26,15 +26,15 @@ FB_W, FB_D = LAB.raw["flexbase"]["width"], LAB.raw["flexbase"]["depth"]   # 6 ft
 ISLAND = LAB.island                       # xmin, ymin, xmax, ymax
 OUTER = LAB.outer
 STYLE = {  # name: (colour, label)
-    "transfer": ("#1A7F8E", "Transfer pose\n(under chute)"),
+    "transfer": ("#1A7F8E", "Transfer pose\n(tray under funnel)"),
     "transfer_staging": ("#7FB8C0", "Transfer\nstaging"),
-    "return_drop": ("#8E44AD", "Return-bin\nunload pose"),
+    "return_drop": ("#8E44AD", "Return pose\n(tray tilts into bin)"),
     "dock": ("#2E8B57", "Charging dock"),
     "station_a": ("#E07A2F", "Delivery\nstation A"),
     "station_b": ("#E07A2F", "Delivery\nstation B"),
 }
 POSES = {n: (p.x, p.y, round(p.yaw_deg), *STYLE.get(n, ("#999", n))) for n, p in LAB.poses.items()}
-LABEL_OFFSET = {"transfer_staging": (0.24, -0.05), "transfer": (0.24, -0.05), "return_drop": (0.24, 0.05),
+LABEL_OFFSET = {"transfer_staging": (0.24, -0.05), "transfer": (0.24, -0.05), "return_drop": (0.24, 0.12),
                 "dock": (-0.55, -0.45), "station_a": (0.25, 0.0), "station_b": (0.25, 0.0)}
 CORNERS = list(LAB.corners.values())      # loop waypoints (corridor centre)
 
@@ -49,18 +49,25 @@ def main() -> None:
             "Robot danger zone (workspace + stopping distance) must stay inside the FlexBase guarding.\n"
             "Hatched = service / door clearance around the cell - TurtleBot never enters it.",
             color="#C0392B", ha="center", va="top", fontsize=8)
-    # conveyor out of the +x end to the transfer station
-    cv, ts, ch = LAB.raw["conveyor"], LAB.raw["transfer_station"], LAB.raw["chute"]
-    ax.add_patch(Rectangle((cv["x_start"], -cv["width"] / 2), cv["x_end"] - cv["x_start"], cv["width"], fc="#B0B7BE", ec="black"))
-    ax.text((FB_W / 2 + ts["x_min"]) / 2, -0.13, "Quickdraw\nconveyor", fontsize=7, ha="center", va="top")
-    ax.add_patch(Rectangle((ts["x_min"], ts["y_min"]), ts["x_max"] - ts["x_min"], ts["y_max"] - ts["y_min"], fc="#F6D7B0", ec="black"))
-    ax.text((ts["x_min"] + ts["x_max"]) / 2, ts["y_max"] + 0.05, "Transfer station\n(stop + gravity chute)", fontsize=7, ha="center", va="bottom")
-    w = ch["width"] / 2
-    ax.add_patch(Polygon([(ch["x_top"], -w), (ch["x_top"], w), (ch["x_exit"], w / 2), (ch["x_exit"], -w / 2)],
-                         fc="#E9B872", ec="black"))
+    # direct-to-chute transfer: the KUKA drops each part into the chute inlet inside the guarding;
+    # the chute crosses the east guard panel and a funnel puts the part on the robot's tray
+    ch, sup, rb = LAB.raw["chute"], LAB.raw["chute_support"], LAB.raw["return_bin"]
+    ax.add_patch(Rectangle((sup["x_min"], sup["y_min"]), sup["x_max"] - sup["x_min"], sup["y_max"] - sup["y_min"],
+                           fc="#8C8C96", ec="black"))
+    ax.add_patch(Rectangle((rb["x_min"], rb["y_min"]), rb["x_max"] - rb["x_min"], rb["y_max"] - rb["y_min"],
+                           fc="#D98880", ec="black"))
+    ax.text((rb["x_min"] + rb["x_max"]) / 2, rb["y_max"] + 0.04, "Return bin", fontsize=7, ha="center", va="bottom")
+    ax.annotate("Gravity chute + funnel: the KUKA drops each part in\ninside the guarding; it lands on the tray",
+                xy=(1.25, -0.04), xytext=(-0.95, -0.66), fontsize=7, va="center",
+                arrowprops=dict(arrowstyle="->", color="#7D5A00"))
     ax.add_patch(Rectangle((-FB_W / 2, -FB_D / 2), FB_W, FB_D, fc="#17324D", ec="black", lw=2))
     ax.text(0, 0.08, "FlexBase 6 ft\n72\" x 40\" (1.83 x 1.02 m)\nKR 6 R900-2 inside guarding", color="white",
             ha="center", va="center", fontsize=10, fontweight="bold")
+    w = ch["width"] / 2
+    ax.add_patch(Polygon([(ch["x_top"], -w), (ch["x_top"], w), (ch["x_exit"], w / 2), (ch["x_exit"], -w / 2)],
+                         fc="#E9B872", ec="black"))
+    f = LAB.raw["funnel"]
+    ax.add_patch(plt.Circle((ch["x_exit"], 0.0), f["d_top"] / 2, fc="none", ec="#B9770E", lw=2, ls="--"))
     # corridor centre loop
     xs = [c[0] for c in CORNERS] + [CORNERS[0][0]]
     ys = [c[1] for c in CORNERS] + [CORNERS[0][1]]

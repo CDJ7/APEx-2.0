@@ -1,5 +1,6 @@
 """Lab model and generated world/map stay consistent with lab.yaml."""
 
+import math
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -32,10 +33,22 @@ def test_poses_are_in_corridors_and_clear_of_solids(lab):
             assert not s.contains(p.x, p.y, margin=r), f"{name} collides with {s.name}"
 
 
-def test_transfer_pose_is_under_chute_exit(lab):
-    t, c = lab.poses["transfer"], lab.raw["chute"]
-    assert abs(t.x - c["x_exit"]) < 0.10
-    assert c["z_exit"] > lab.raw["robot"]["height"]        # chute exit clears the robot
+def test_transfer_pose_is_under_funnel_and_chute_crosses_the_guarding(lab):
+    t, c, f = lab.poses["transfer"], lab.raw["chute"], lab.raw["funnel"]
+    assert abs(t.x - c["x_exit"]) < 0.02 and abs(t.y) < 0.02          # tray centre under the funnel outlet
+    assert f["z_bottom"] > lab.raw["robot"]["height"] + 0.08           # funnel clears robot top + tray
+    assert c["x_top"] < lab.raw["flexbase"]["width"] / 2 < c["x_exit"]  # inlet inside the guarding, exit outside
+    slope = math.degrees(math.atan2(c["z_top"] - c["z_exit"], c["x_exit"] - c["x_top"]))
+    assert 25 <= slope <= 50, slope                                    # steep enough for gravity [TBD per part]
+    assert lab.raw["transfer_mode"] == "D"
+
+
+def test_return_pose_is_beside_return_bin(lab):
+    p = lab.poses["return_drop"]
+    rb = next(s for s in lab.solids if s.name == "return_bin")
+    assert rb.ymin < p.y < rb.ymax                                     # bin is right beside the robot
+    assert 0.25 <= p.x - rb.xmax <= 0.35                               # left side of the robot, footprint clear
+    assert rb.sz < lab.raw["robot"]["height"]                          # rim below the tray
 
 
 def test_corridor_width_is_5ft(lab):
@@ -45,7 +58,7 @@ def test_corridor_width_is_5ft(lab):
 def test_world_sdf_has_all_models(lab):
     sdf = generate_lab.world_sdf(lab, ["barrier_north"])
     names = {m.get("name") for m in ET.fromstring(sdf).iter("model")}
-    for n in ("flexbase", "conveyor", "transfer_station", "chute", "barrier_north", "station_a_table",
+    for n in ("flexbase", "chute_support", "return_bin", "chute", "funnel", "barrier_north", "station_a_table",
               "wall_north", "ground_plane"):
         assert n in names
 

@@ -20,7 +20,7 @@ from apex_plc_bridge.tags import READ_PREFIX, WRITE_PREFIX, TagSpec
 
 log = logging.getLogger("apex.cell_sim")
 
-MODE_CODE = {"A": 1, "B": 2, "C": 3}
+MODE_CODE = {"A": 1, "B": 2, "C": 3, "D": 4}   # D = KUKA drops straight into the gravity chute (chosen)
 FAULT = {"NONE": 0, "STATION_HEARTBEAT_LOST": 1, "PICK_FAILED": 2, "CONVEYOR_TIMEOUT": 3, "TRANSFER_TIMEOUT": 4,
          "COUNT_MISMATCH": 5, "AGV_NOT_IN_POSITION": 6, "KUKA_NOT_READY": 7, "CELL_NOT_AUTO": 8, "STATION_FAULT": 9}
 
@@ -31,10 +31,10 @@ class CellTiming:
 
     ack_delay: float = 0.5
     in_position_delay: float = 1.0
-    pick: float = 6.0          # KUKA: shelf -> conveyor for one part         [TBD measured]
-    convey: float = 4.0        # conveyor run-out to the stop station            [TBD]
-    release: float = 0.5       # stop station opens (B) / pusher stroke (A)
-    drop: float = 1.0          # part slides down the gravity chute
+    pick: float = 6.0          # KUKA: shelf -> chute inlet (D) or conveyor (A/B), one part   [TBD measured]
+    convey: float = 4.0        # A/B only: conveyor run-out to the stop station              [TBD]
+    release: float = 0.5       # A/B only: stop station opens (B) / pusher stroke (A)
+    drop: float = 1.0          # part slides down the gravity chute + funnel into the tray
     heartbeat: float = 0.5
     station_hb_timeout: float = 2.0
 
@@ -53,7 +53,7 @@ class FaultInjection:
 class _Load:
     units: list[int]                      # part code per unit, in pick order
     index: int = 0
-    phase: str = "pick"                   # pick -> convey -> release -> drop
+    phase: str = "pick"                   # D: pick -> drop      A/B: pick -> convey -> release -> drop
     phase_end: float = 0.0
     held: bool = False
 
@@ -61,7 +61,7 @@ class _Load:
 @dataclass
 class CellModel:
     spec: TagSpec
-    transfer_mode: str = "B"
+    transfer_mode: str = "D"
     timing: CellTiming = field(default_factory=CellTiming)
     faults: FaultInjection = field(default_factory=FaultInjection)
     on_part_counted: Callable[[int, int], None] | None = None   # (job_id, count) e.g. Gazebo part spawn
@@ -225,8 +225,11 @@ class CellModel:
                 return
             self.set("Parts_Placed", int(self.get("Parts_Placed")) + 1)
             self.set("KUKA_Busy", False)
-            self.set("Conveyor_Run", True)
-            ld.phase, ld.phase_end = "convey", self._now + self.timing.convey
+            if self.transfer_mode == "D":           # the KUKA released the part into the chute inlet
+                ld.phase, ld.phase_end = "drop", self._now + self.timing.drop
+            else:
+                self.set("Conveyor_Run", True)
+                ld.phase, ld.phase_end = "convey", self._now + self.timing.convey
         elif ld.phase == "convey":
             self.set("Conveyor_Run", False)
             self.set("Pusher_Extend" if self.transfer_mode == "A" else "StopStation_Release", True)

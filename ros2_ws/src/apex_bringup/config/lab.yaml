@@ -8,7 +8,7 @@
 # Regenerate:  python3 ros2_ws/src/apex_bringup/apex_bringup/generate_lab.py
 #
 # Frame: map / world. Origin = centre of the FlexBase footprint, +x along its
-# 72" length toward the conveyor exit, +y left, metres, yaw in degrees.
+# 72" length toward the chute (east end), +y left, metres, yaw in degrees.
 # Values marked TBD are proposals (docs/OPEN_QUESTIONS.md) - measure the real lab.
 
 world_name: apex_lab
@@ -20,7 +20,7 @@ flexbase:                    # Automation NTH FlexBase 6 ft model (confirmed)
 
 island:                      # TurtleBot keep-out area around the cell (Nav2 keepout zone)
   clearance: 0.30            # service / door clearance on every side      [TBD: door swing]
-  x_extension: 0.95          # extra length on +x for conveyor run-out + transfer station
+  x_extension: 0.45          # extra length on +x for the chute support + return bin (no conveyor any more)
 
 corridor_width: 1.524        # 5 ft loop corridor all round the island
 
@@ -28,26 +28,36 @@ walls:
   height: 1.0
   thickness: 0.10
 
-conveyor:                    # Quickdraw conveyor run-out from the FlexBase (+x end)  [TBD: real exit side/height]
-  x_start: 0.414
-  x_end: 1.764
-  width: 0.18
-  top_height: 0.85           # [TBD: measured conveyor height at exit]
+transfer_mode: D             # D = KUKA drops each part straight into the gravity chute (CHOSEN 2026-11-19)
+                             # (A pusher / B conveyor + gravity chute / C tilt tray remain in the cell sim)
 
-transfer_station:            # stop station + chute support stand, outside the guarding
-  x_min: 1.464
-  x_max: 1.864
-  y_min: -0.25
-  y_max: 0.25
-  height: 0.85
-  mode: B                    # A pusher+chute | B gravity chute (CHOSEN) | C lift-and-locate+tilt tray
-
-chute:                       # gravity chute from conveyor end down into the delivery bin
-  x_top: 1.864
-  z_top: 0.85
-  x_exit: 2.14               # exit is above the transfer pose (robot body clears the transfer station by ~9 cm)
-  z_exit: 0.55               # [TBD] must clear TurtleBot top (0.351 m) + bin height
+chute:                       # gravity chute: inlet INSIDE the guarding (KUKA drops the part in), passes through
+                             # an opening in the east guard panel, exits into the funnel above the robot's tray
+  x_top: 0.80                # inlet, inside the guarding (FlexBase end panel at x = 0.9145)  [TBD: KR6 reach]
+  z_top: 1.10                # inlet height                                                      [TBD]
+  x_exit: 1.65               # exit = funnel centre = transfer pose x
+  z_exit: 0.62               # chute exit / funnel mouth height                                  [TBD]
   width: 0.20
+
+funnel:                      # funnel at the chute exit: centres every part onto the same spot in the robot's tray
+  z_top: 0.62
+  z_bottom: 0.48             # outlet must clear TurtleBot top (0.351 m) + tray (~0.08 m)         [TBD]
+  d_top: 0.20
+  d_bottom: 0.08             # outlet diameter: larger than the biggest part                      [TBD: Q-S4]
+
+chute_support:               # post carrying the chute exit + funnel, inside the island
+  x_min: 1.20
+  x_max: 1.36
+  y_min: -0.10
+  y_max: 0.10
+  height: 0.62
+
+return_bin:                  # damaged-part bin next to the FlexBase: the robot parks beside it and tilts its tray
+  x_min: 1.10                #   so the parts slide off into it                                  [TBD: size/height]
+  x_max: 1.36
+  y_min: 0.44
+  y_max: 0.80               # stays inside the island (north edge y = 0.808)
+  height: 0.30               # rim below the tilted tray edge
 
 stations:                    # physical delivery-station tables against the outer walls
   table_size: [1.0, 0.30, 0.75]   # x, y, height
@@ -59,19 +69,19 @@ robot:                       # TurtleBot 4 standard (user manual)
   max_speed: 0.31            # safe mode
 
 poses:                       # name: [x, y, yaw_deg]
-  transfer:          [2.14,  0.00,  90]     # bin under the chute exit
-  transfer_staging:  [2.14, -0.60,  90]     # Nav2 hands over to the precise final approach here
-  return_drop:       [2.14,  0.75,  90]     # operator empties the return bin (damaged parts - deferred)
-  dock:              [3.10, -1.20,   0]     # charging dock on the east outer wall [TBD: outlet]
+  transfer:          [1.65,  0.00,  90]     # tray centre under the funnel outlet
+  transfer_staging:  [1.65, -0.60,  90]     # Nav2 hands over to the precise final approach here
+  return_drop:       [1.65,  0.62,  90]     # beside the return bin: tilt the tray to the left (west) into it
+  dock:              [2.60, -1.20,   0]     # charging dock on the east outer wall [TBD: outlet]
   station_a:         [0.00,  1.75, 180]     # delivery station A (north)
   station_b:         [0.00, -1.75,   0]     # delivery station B (south)
 
 loop:                        # corridor centre-line corners, counter-clockwise order
   corners:
-    NE: [ 2.63,  1.57]
+    NE: [ 2.13,  1.57]
     NW: [-1.98,  1.57]
     SW: [-1.98, -1.57]
-    SE: [ 2.63, -1.57]
+    SE: [ 2.13, -1.57]
 
 obstacles:                   # available obstacle models; worlds/scenarios choose which are present
   box_small:      {center: [-1.30,  1.57], size: [0.40, 0.40, 0.40]}   # Nav2 drives round it

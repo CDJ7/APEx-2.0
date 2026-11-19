@@ -37,6 +37,7 @@ SCENARIOS: dict[str, list[str]] = {
 
 COLOURS = {
     "flexbase": "0.09 0.20 0.30 1", "conveyor": "0.6 0.6 0.6 1", "transfer_station": "0.95 0.8 0.6 1",
+    "chute_support": "0.55 0.55 0.6 1", "return_bin": "0.85 0.2 0.2 1", "funnel": "0.95 0.75 0.3 1",
     "wall": "0.85 0.85 0.85 1", "table": "0.88 0.48 0.18 1", "obstacle": "0.75 0.22 0.17 1", "chute": "0.9 0.7 0.4 1",
 }
 
@@ -73,6 +74,25 @@ def _chute_model(lab: LabModel) -> str:
     </model>"""
 
 
+def _funnel_model(lab: LabModel) -> str:
+    """Funnel at the chute exit (visual only: a truncated cone approximated by a cylinder of the mean
+    diameter - Gazebo has no cone primitive in SDF 1.8)."""
+    f, c = lab.raw.get("funnel"), lab.raw["chute"]
+    if not f:
+        return ""
+    h = f["z_top"] - f["z_bottom"]
+    r = (f["d_top"] + f["d_bottom"]) / 4
+    return f"""
+    <model name="funnel">
+      <static>true</static>
+      <pose>{c["x_exit"]:.4f} 0 {f["z_bottom"] + h / 2:.4f} 0 0 0</pose>
+      <link name="link">
+        <visual name="visual"><geometry><cylinder><radius>{r:.4f}</radius><length>{h:.4f}</length></cylinder></geometry>
+          <material><ambient>{COLOURS['funnel']}</ambient><diffuse>{COLOURS['funnel']}</diffuse></material></visual>
+      </link>
+    </model>"""
+
+
 def world_sdf(lab: LabModel, obstacles: list[str]) -> str:
     """Return the full SDF text for the lab with the given obstacles present."""
     name = lab.world_name
@@ -83,6 +103,7 @@ def world_sdf(lab: LabModel, obstacles: list[str]) -> str:
         colour = COLOURS["table"] if s.name.endswith("_table") else COLOURS.get(s.name, COLOURS["wall"])
         models.append(_box_model(s, colour))
     models.append(_chute_model(lab))
+    models.append(_funnel_model(lab))
     for o in obstacles:
         models.append(_box_model(lab.obstacles[o], COLOURS["obstacle"]))
     body = "\n".join(models)

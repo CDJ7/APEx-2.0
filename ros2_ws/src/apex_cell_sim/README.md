@@ -1,7 +1,7 @@
 # apex_cell_sim
 
 A software stand-in for the FlexBase cell - GuardLogix standard task, KUKA KR 6 R900-2,
-Quickdraw conveyor and the **gravity chute** - that speaks the **same tag names, the same
+the **gravity chute** and the funnel-outlet photoeye - that speaks the **same tag names, the same
 handshake order and comparable timing** as the real PLC program will. Moving from simulation
 to hardware is a configuration change (network profile + backend), not a code change.
 
@@ -9,15 +9,16 @@ to hardware is a configuration change (network profile + backend), not a code ch
 
 ```
 Job_Request ─► Job_Ack (ack_delay) ─► robot parks ─► AGV_AtTransfer ─► AGV_InPosition_Confirmed
-     ─► Load_Request ─► for each unit: pick (KUKA) ─► convey ─► release at stop station
-     ─► drop down the chute ─► Chute_PartCount += 1 ─► ... ─► Load_Complete (or COUNT_MISMATCH)
+     ─► Load_Request ─► for each unit: pick (KUKA drops it into the chute inlet)
+     ─► slide down the chute + funnel ─► Chute_PartCount += 1 ─► ... ─► Load_Complete (or COUNT_MISMATCH)
 ```
 
 * `PLC_Heartbeat` counts every 0.5 s; a station heartbeat older than 2 s during a job faults
   the cell (`STATION_HEARTBEAT_LOST`).
 * `Job_Fault_Station` from the orchestrator holds the cell; `Fault_Reset_Request` clears.
-* Transfer modes A (pusher + chute), **B (gravity chute, chosen)** and C (tilt tray) set
-  `Transfer_Mode` and which actuator tag pulses.
+* Transfer mode **D (direct to the chute, chosen 2026-11-19, default)**: pick → drop → count,
+  no conveyor tags. Modes A (pusher), B (conveyor + stop station + chute) and C (tilt tray) are
+  kept for comparison; they add the convey / release phases and pulse their actuator tags.
 * Stack lights follow the cell state.
 * **`Safety_Simulated` is always true** and `Safety_OK` is a constant. The simulator never
   pretends to be the safety system; the station shows "SIMULATED SAFETY" when it sees it.

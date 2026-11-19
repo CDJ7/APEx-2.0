@@ -37,8 +37,8 @@ to_station:                         # PLC -> station PC (read only)
   Job_Ack:                  {type: DINT, doc: "echoes Job_ID once accepted"}
   Cell_ReadyForAGV:         {type: BOOL, doc: "transfer station clear and ready"}
   AGV_InPosition_Confirmed: {type: BOOL, doc: "PLC sensor confirms robot/bin under the chute"}
-  Conveyor_Run:             {type: BOOL}
-  StopStation_Release:      {type: BOOL}
+  Conveyor_Run:             {type: BOOL, doc: "transfer_mode A/B only (no conveyor in mode D)"}
+  StopStation_Release:      {type: BOOL, doc: "transfer_mode A/B only"}
   Pusher_Extend:            {type: BOOL, doc: "transfer_mode A only"}
   Chute_PartCount:          {type: DINT, doc: "parts counted by the photoeye for this job"}
   Parts_Placed:             {type: DINT, doc: "parts the KUKA placed on the conveyor for this job"}
@@ -47,7 +47,7 @@ to_station:                         # PLC -> station PC (read only)
   Load_Complete:            {type: BOOL}
   Job_Fault:                {type: BOOL}
   Fault_Code:               {type: DINT, doc: "see fault_codes below"}
-  Transfer_Mode:            {type: DINT, doc: "1 A, 2 B, 3 C"}
+  Transfer_Mode:            {type: DINT, doc: "1 A, 2 B, 3 C, 4 D direct-to-chute (chosen)"}
   KUKA_Mode:                {type: DINT, doc: "1 T1, 2 T2, 3 AUT, 4 AUT EXT (from KR C4 outputs)", read_only: true}
   KUKA_Ready:               {type: BOOL, read_only: true}
   KUKA_Busy:                {type: BOOL, read_only: true}
