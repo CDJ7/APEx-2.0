@@ -12,6 +12,11 @@ Navigation backends (parameter ``nav_backend``)
     nav2       TurtleBot 4 + Nav2 (Gazebo or the real robot) through :class:`Nav2Adapter`
     kinematic  the headless stand-in (no Gazebo, no Nav2) - checks the ROS wiring anywhere
 
+Tilt tray (parameter ``tilt_backend``)
+    ros        the ``tilt_platform`` node (on the robot, or simulated on the station PC)
+    inprocess  simulated tray inside this node (with ``nav_backend:=kinematic``)
+    none       no tray: damaged parts are returned with the manual operator step
+
 Job IDs start above the PLC's last ``Job_ID``/``Job_Ack`` so a restarted orchestrator can
 never be "acknowledged" by a stale Job_Ack from before the restart.
 """
@@ -84,6 +89,7 @@ class OrchestratorNode(Node):
         nav_backend = self.declare_parameter("nav_backend", "nav2").value
         namespace = self.declare_parameter("robot_namespace", "").value
         obstacles = list(self.declare_parameter("kinematic_obstacles", [""]).value)
+        tilt_backend = self.declare_parameter("tilt_backend", "ros").value
 
         self.lab = LabModel.load(lab_file)
         timeouts, policy, router_cfg = load_job_config(job_file)
@@ -100,7 +106,17 @@ class OrchestratorNode(Node):
         self.nav_backend = nav_backend
         self.plc = RosPlcPort(self)
         router = LoopRouter(list(self.lab.corners.values()), **router_cfg)
-        self.machine = JobMachine(self.nav, self.plc, router, poses, timeouts, policy, on_event=self._on_event)
+        self.tilt = None
+        if tilt_backend == "ros":
+            from apex_tilt.ros_port import RosTiltPort
+            self.tilt = RosTiltPort(self)
+        elif tilt_backend == "inprocess":
+            from apex_tilt.port import InProcessTilt
+            self.tilt = InProcessTilt()
+        elif tilt_backend != "none":
+            raise ValueError(f"tilt_backend must be ros, inprocess or none, not {tilt_backend!r}")
+        self.machine = JobMachine(self.nav, self.plc, router, poses, timeouts, policy, on_event=self._on_event,
+                                  tilt=self.tilt)
         self._next_id = 0
         self._started = False
 
@@ -133,6 +149,8 @@ class OrchestratorNode(Node):
             self.get_logger().info(f"ready; first job id {self._next_id}")
         if isinstance(self.nav, KinematicNav):
             self.nav.update(now)
+        if hasattr(self.tilt, "update"):
+            self.tilt.update(now, moving=self.nav.status().value == "running")
         self.machine.tick(now)
 
     def _on_event(self, kind: str, job: Job | None, data: dict[str, Any]) -> None:
@@ -159,6 +177,7 @@ class OrchestratorNode(Node):
         m.docked = bool(self.nav.is_docked())
         m.route_xy = [float(v) for p in s["route_xy"] for v in p]
         m.blocked_xy = [float(v) for p in s["blocked_xy"] for v in p]
+        m.tilt_state = s.get("tilt", "")
         self.pub_status.publish(m)
 
     # ------------------------------------------------------------------ services
@@ -201,6 +220,7 @@ class OrchestratorNode(Node):
             "reset": lambda: self.machine.reset_fault(who),
             "resume": lambda: self.machine.resume(who),
             "cancel": lambda: self.machine.cancel(int(req.job_id)),
+            "tray_home": lambda: self.machine.tray_home(who),
         }
         if req.action not in actions:
             res.ok, res.message = False, f"action must be one of {sorted(actions)}"

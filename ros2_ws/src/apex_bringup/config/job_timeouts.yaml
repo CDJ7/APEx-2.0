@@ -15,14 +15,17 @@ timeouts:
   return_remind: 300.0
   dock: 120.0
   dock_retries: 2
+  tilt_dump: 30.0             # whole tray cycle flat -> ramp -> hold -> flat
+  tilt_start: 5.0             # tray must accept the dump within this after parking (robot settling)
   heartbeat: 2.0              # PLC heartbeat stale -> PLC_LINK_LOST
 policy:
   battery_min_start_pct: 40.0 # [TBD] measure real consumption per trip
   battery_dock_pct: 30.0
-  # Damaged-part handling is deferred (team decision). The software keeps the simple
-  # "drive to return_drop, operator confirms" path so the receipt data is complete; the
-  # physical return mechanism is designed in a later stage.
+  # Damaged parts (team decision 2026-11-19): the robot carries them to the return bin next to
+  # the FlexBase and a motor tilts its tray into a ramp so they slide off (docs/TRANSFER_AND_RETURN.md).
   return_trip_enabled: true
+  return_mode: tilt           # tilt = robot's motorised tray slides the damaged parts into the return bin
+                              # manual = an operator empties the return bin and confirms the count
   station_heartbeat_s: 0.5
   pulse_hold_s: 0.5
   idle_dock_s: 5.0            # idle off the dock (after a cancel / resume) -> back to the dock

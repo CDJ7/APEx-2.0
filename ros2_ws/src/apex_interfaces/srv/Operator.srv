@@ -1,4 +1,4 @@
-# Operator commands: stop | reset | resume | cancel (cancel uses job_id).
+# Operator commands: stop | reset | resume | cancel (cancel uses job_id) | tray_home (tilt tray back to flat).
 string action
 string operator_name
 uint32 job_id

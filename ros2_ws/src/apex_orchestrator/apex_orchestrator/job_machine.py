@@ -71,7 +71,8 @@ class Step(str, Enum):
     NAV_TO_STATION = "NAV_TO_STATION"
     AWAIT_RECEIPT = "AWAIT_RECEIPT"
     NAV_TO_RETURN = "NAV_TO_RETURN"
-    AWAIT_RETURN_CONFIRM = "AWAIT_RETURN_CONFIRM"
+    RETURN_DUMP = "RETURN_DUMP"           # parked beside the return bin, tray tilting (return_mode tilt)
+    AWAIT_RETURN_CONFIRM = "AWAIT_RETURN_CONFIRM"   # return_mode manual: operator empties the return bin
     NAV_TO_DOCK = "NAV_TO_DOCK"
     DOCKING = "DOCKING"
     FAULT = "FAULT"
@@ -129,13 +130,16 @@ class Timeouts:
     dock: float = 120.0
     dock_retries: int = 2
     heartbeat: float = 2.0
+    tilt_dump: float = 30.0               # whole tilt cycle (flat -> ramp -> hold -> flat)
+    tilt_start: float = 5.0               # tray must accept the dump within this after parking
 
 
 @dataclass
 class Policy:
     battery_min_start_pct: float = 40.0   # do not start a job below this        [TBD]
     battery_dock_pct: float = 30.0        # go and charge below this when idle    [TBD]
-    return_trip_enabled: bool = True      # damaged-part return (mechanism still to be designed)
+    return_trip_enabled: bool = True      # carry damaged parts back to the return bin by the FlexBase
+    return_mode: str = "tilt"             # tilt = motorised tray slides them into the bin | manual = operator
     station_heartbeat_s: float = 0.5
     pulse_hold_s: float = 0.5             # minimum on-time of request bits (many PLC scans)
     idle_dock_s: float = 5.0              # idle and off the dock this long -> return to the dock
@@ -145,10 +149,15 @@ class Policy:
 class JobMachine:
     def __init__(self, nav: NavPort, plc: PlcPort, router: LoopRouter, poses: dict[str, tuple[float, float, float]],
                  timeouts: Timeouts | None = None, policy: Policy | None = None,
-                 on_event: Callable[[str, Job | None, dict[str, Any]], None] | None = None):
+                 on_event: Callable[[str, Job | None, dict[str, Any]], None] | None = None,
+                 tilt: Any = None):
         self.nav, self.plc, self.router, self.poses = nav, plc, router, poses
         self.t = timeouts or Timeouts()
         self.policy = policy or Policy()
+        self.tilt = tilt                      # apex_tilt.port.TiltPort or None
+        if self.policy.return_mode == "tilt" and tilt is None:
+            log.warning("return_mode 'tilt' but no tilt tray connected - using the manual return")
+            self.policy.return_mode = "manual"
         self.on_event = on_event or (lambda kind, job, data: None)
         self.queue: deque[Job] = deque()
         self.job: Job | None = None
@@ -171,6 +180,7 @@ class JobMachine:
         self._reset_pending = False
         self._reminded = False
         self._operator_stop = False
+        self._dump_started = False
 
     # ------------------------------------------------------------ public API (GUI / REST / services)
     def submit(self, job: Job) -> None:
@@ -194,7 +204,7 @@ class JobMachine:
         job.receipt = [dict(r) for r in lines]
         self._emit("receipt_confirmed", job, lines=job.receipt)
         if job.damaged and self.policy.return_trip_enabled:
-            self._navigate("return_drop", Step.AWAIT_RETURN_CONFIRM, Step.NAV_TO_RETURN)
+            self._navigate("return_drop", self._return_step(), Step.NAV_TO_RETURN)
         else:
             self._finish_job("delivered")
 
@@ -235,6 +245,7 @@ class JobMachine:
         if self.step is not Step.FAULT:
             raise RuntimeError("no fault to reset")
         self._operator_stop = False
+        self._dump_started = False
         self._reset_pending = True
         self._pulse("Fault_Reset_Request")
         self._write("Job_Fault_Station", False)
@@ -252,11 +263,21 @@ class JobMachine:
         elif target is Step.NAV_TO_STATION and self.job:
             self._navigate(self.job.destination, Step.AWAIT_RECEIPT, Step.NAV_TO_STATION)
         elif target is Step.NAV_TO_RETURN:
-            self._navigate("return_drop", Step.AWAIT_RETURN_CONFIRM, Step.NAV_TO_RETURN)
+            self._navigate("return_drop", self._return_step(), Step.NAV_TO_RETURN)
         elif target is Step.NAV_TO_DOCK:
             self._navigate("dock", Step.DOCKING, Step.NAV_TO_DOCK)
         else:
             self._goto(Step.IDLE)
+
+    def tray_home(self, who: str = "operator") -> None:
+        """Operator: drive the tilt tray back to flat after a tray fault (robot must be stopped)."""
+        if self.tilt is None:
+            raise RuntimeError("no tilt tray on this robot")
+        if self.step not in (Step.IDLE, Step.FAULT, Step.RESUME_WAIT, Step.AWAIT_RECEIPT,
+                             Step.AWAIT_RETURN_CONFIRM):
+            raise RuntimeError(f"cannot home the tray during {self.step.value}")
+        self.tilt.home()
+        self._emit("tray_home", self.job, by=who)
 
     def cancel(self, job_id: int) -> None:
         for j in list(self.queue):
@@ -266,7 +287,7 @@ class JobMachine:
                 return
         if self.job and self.job.job_id == job_id:
             if self.step in (Step.AWAIT_RECEIPT, Step.AWAIT_RETURN_CONFIRM, Step.NAV_TO_STATION,
-                             Step.NAV_TO_RETURN):
+                             Step.NAV_TO_RETURN, Step.RETURN_DUMP):
                 raise RuntimeError("parts are on the robot - finish or fault the job instead")
             self.nav.cancel()
             self._pulse("Job_Cancel")
@@ -288,6 +309,7 @@ class JobMachine:
             "route_xy": [list(p) for p in self._routes[0].waypoints] if self._routes else [],
             "blocked_xy": [list(p) for p in self.router.blocked_points(self._now)],
             "not_loaded": list(j.not_loaded) if j else [],
+            "tilt": self.tilt.state() if self.tilt is not None else "",
         }
 
     # ------------------------------------------------------------ main loop
@@ -335,6 +357,8 @@ class JobMachine:
     def _on_wait_plc_ack(self) -> None:
         if int(self.tags.get("Job_Ack", 0)) == self.job.job_id:
             self._emit("plc_ack", self.job)
+            if not self._motion_allowed():
+                return
             if self.nav.is_docked():
                 self.nav.start_undock()
                 self._goto(Step.UNDOCKING)
@@ -410,6 +434,29 @@ class JobMachine:
             self._reminded = True
             self._emit("return_reminder", self.job)
 
+    def _on_return_dump(self) -> None:
+        if not self._dump_started:
+            # the tray only tilts once the robot has been still for a moment - keep asking for a while
+            try:
+                self.tilt.start_dump()
+                self._dump_started = True
+                self._emit("return_dump_started", self.job, damaged=self.job.damaged if self.job else 0)
+            except (RuntimeError, ValueError) as exc:
+                if self._elapsed() > self.t.tilt_start:
+                    self._fault("TILT_REFUSED", str(exc))
+            return
+        st = self.tilt.dump_status()
+        if st == "succeeded":
+            job = self.job
+            job.returned = job.damaged
+            self._write("Return_Request", False)
+            self._emit("return_dumped", job, count=job.damaged, verified=False)
+            self._finish_job("delivered_with_return")
+        elif st == "failed":
+            self._fault("TILT_FAILED", self.tilt.fault_text() or "tray cycle failed")
+        elif self._elapsed() > self.t.tilt_dump:
+            self._fault("TILT_TIMEOUT", "tray cycle did not finish")
+
     def _on_nav_to_dock(self) -> None:
         self._drive()
 
@@ -436,8 +483,20 @@ class JobMachine:
             self._goto(Step.RESUME_WAIT)
 
     # ------------------------------------------------------------ navigation helpers
+    def _return_step(self) -> Step:
+        return Step.RETURN_DUMP if self.policy.return_mode == "tilt" else Step.AWAIT_RETURN_CONFIRM
+
+    def _motion_allowed(self) -> bool:
+        """Interlock: the robot never drives while the tilt tray is not flat."""
+        if self.tilt is not None and not self.tilt.is_flat():
+            self._fault("TRAY_NOT_FLAT", f"tilt tray is {self.tilt.state()} - home it before the robot moves")
+            return False
+        return True
+
     def _navigate(self, target: str, then: Step, nav_step: Step) -> None:
         """Start routing to pose ``target``; on arrival go to ``then``."""
+        if not self._motion_allowed():
+            return
         x, y, _ = self.nav.pose()
         goal = self.poses[target]
         self._route_target = target
@@ -468,6 +527,9 @@ class JobMachine:
                 self.nav.start_dock()
             elif then is Step.AWAIT_RETURN_CONFIRM:
                 self._write("Return_Request", True)
+            elif then is Step.RETURN_DUMP:
+                self._write("Return_Request", True)
+                self._dump_started = False
             self._emit("arrived", self.job, target=self._route_target)
             self._goto(then)
         elif st in (NavStatus.FAILED, NavStatus.BLOCKED) or self._elapsed() > self.t.nav_leg:
@@ -525,6 +587,8 @@ class JobMachine:
             return
         prev = self.step
         self.nav.cancel()
+        if self.tilt is not None and prev is Step.RETURN_DUMP:
+            self.tilt.stop()                  # faults stop everything, the tray motor included
         self._write("Job_Fault_Station", True)
         self.fault_code, self.fault_text = code, text
         self._resume_step = self._safe_resume_step(prev)
@@ -537,7 +601,7 @@ class JobMachine:
             return Step.IDLE
         if prev in (Step.NAV_TO_STATION, Step.AWAIT_RECEIPT) or (self.job.loaded_ok and prev is not Step.NAV_TO_RETURN):
             return Step.NAV_TO_STATION if self.job.receipt is None else Step.NAV_TO_RETURN
-        if prev in (Step.NAV_TO_RETURN, Step.AWAIT_RETURN_CONFIRM):
+        if prev in (Step.NAV_TO_RETURN, Step.AWAIT_RETURN_CONFIRM, Step.RETURN_DUMP):
             return Step.NAV_TO_RETURN
         if prev in (Step.NAV_TO_DOCK, Step.DOCKING):
             return Step.NAV_TO_DOCK

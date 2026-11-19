@@ -6,29 +6,32 @@ import pytest
 
 from apex_bringup.lab_model import LabModel
 from apex_cell_sim.cell_model import CellModel, CellTiming, FaultInjection
-from apex_orchestrator.job_machine import Job, JobMachine, OrderLine, Step, Timeouts
+from apex_orchestrator.job_machine import Job, JobMachine, NavStatus, OrderLine, Policy, Step, Timeouts
 from apex_orchestrator.router import LoopRouter
 from apex_orchestrator.sim_nav import KinematicNav, barriers_from_lab
 from apex_plc_bridge.client import InProcessBackend, PlcClient
 from apex_plc_bridge.tags import TagSpec
+from apex_tilt.port import InProcessTilt
 
 CFG = Path(__file__).resolve().parents[1] / "src" / "apex_bringup" / "config"
 DT = 0.1
 
 
 class Rig:
-    def __init__(self, faults=None, obstacles=(), timeouts=None):
+    def __init__(self, faults=None, obstacles=(), timeouts=None, policy=None, tilt=True):
         self.lab = LabModel.load()
         spec = TagSpec.load(CFG / "plc_tags.yaml")
-        self.cell = CellModel(spec, "B", CellTiming(pick=2.0, convey=1.0), faults or FaultInjection())
+        self.cell = CellModel(spec, "D", CellTiming(pick=2.0, convey=1.0), faults or FaultInjection())
         self.plc = PlcClient(spec, InProcessBackend(self.cell))
         d = self.lab.poses["dock"]
         self.nav = KinematicNav(d.x, d.y, d.yaw, approach_s=2, dock_s=2,
                                 barriers=barriers_from_lab(self.lab, list(obstacles), self.lab.raw["corridor_width"]))
         poses = {n: (p.x, p.y, p.yaw) for n, p in self.lab.poses.items()}
         self.events = []
+        self.tilt = InProcessTilt() if tilt else None
         self.m = JobMachine(self.nav, self.plc, LoopRouter(list(self.lab.corners.values())), poses,
-                            timeouts or Timeouts(), on_event=lambda k, j, d: self.events.append((k, d)))
+                            timeouts or Timeouts(), policy or Policy(),
+                            on_event=lambda k, j, d: self.events.append((k, d)), tilt=self.tilt)
         self.now = 0.0
         self.writes = []
         orig = self.plc.write
@@ -42,6 +45,8 @@ class Rig:
         self.now = round(self.now + DT, 3)
         self.cell.tick(self.now)
         self.nav.update(self.now)
+        if self.tilt:
+            self.tilt.update(self.now, moving=self.nav.status() is NavStatus.RUNNING)
         self.m.tick(self.now)
         if worker:
             worker(self.m)
@@ -92,8 +97,64 @@ def test_reroute_when_north_corridor_blocked():
     assert "rerouting" in r.kinds()
 
 
-def test_damaged_part_return_trip():
+def test_damaged_parts_return_by_tilting_the_tray():
     r = Rig()
+    r.m.submit(order(dest="station_b", lines=((10, 3),)))
+
+    def worker(m):
+        if m.step is Step.AWAIT_RECEIPT:
+            m.confirm_receipt(m.job.job_id, [{"ok": 1, "damaged": 2, "missing": 0}])
+    assert r.run_until(lambda m: m.step is Step.RETURN_DUMP, worker)
+    assert r.cell.get("Return_Request") is True
+    assert r.run_until(done, worker)
+    dumped = [d for k, d in r.events if k == "return_dumped"][0]
+    assert dumped["count"] == 2 and r.tilt.ctrl.cycles == 1
+    assert r.cell.get("Return_Request") is False
+    assert "return_confirmed" not in r.kinds()                 # no operator step needed
+
+
+def test_tray_not_flat_blocks_all_motion():
+    r = Rig()
+    r.tilt.ctrl.backend.angle = 10.0                          # tray stuck part-way
+    r.tilt.ctrl.tick(0.05, False)
+    r.m.submit(order())
+    assert r.run_until(lambda m: m.step is Step.FAULT, limit=20)
+    assert r.m.fault_code == "TRAY_NOT_FLAT" and r.nav.is_docked()
+    for _ in range(15):                                        # robot parked for a moment
+        r.step()
+    r.m.tray_home("test")
+    assert r.run_until(lambda m: r.tilt.is_flat(), limit=r.now + 10)
+    r.m.reset_fault("test")
+    assert r.run_until(lambda m: m.step is Step.RESUME_WAIT, limit=r.now + 5)
+    r.m.resume("test")
+    assert r.run_until(done, receipt_all_ok)
+
+
+def test_tray_jam_faults_then_home_and_resume_retries_the_dump():
+    r = Rig()
+    r.m.submit(order(dest="station_b", lines=((10, 2),)))
+
+    def worker(m):
+        if m.step is Step.AWAIT_RECEIPT:
+            m.confirm_receipt(m.job.job_id, [{"ok": 1, "damaged": 1, "missing": 0}])
+        if m.step is Step.RETURN_DUMP and r.tilt.ctrl.backend.angle > 5:
+            r.tilt.ctrl.backend.jam = True
+    assert r.run_until(lambda m: m.step is Step.FAULT, worker)
+    assert r.m.fault_code == "TILT_FAILED" and r.tilt.ctrl.backend.direction == 0
+    r.tilt.ctrl.backend.jam = False
+    for _ in range(15):
+        r.step()
+    r.m.tray_home("test")
+    assert r.run_until(lambda m: r.tilt.is_flat(), limit=r.now + 10)
+    r.m.reset_fault("test")
+    assert r.run_until(lambda m: m.step is Step.RESUME_WAIT, limit=r.now + 5)
+    r.m.resume("test")                                        # back to the return pose, dump again
+    assert r.run_until(done)
+    assert [k for k in r.kinds() if k == "return_dumped"]
+
+
+def test_damaged_part_return_trip_manual_mode():
+    r = Rig(policy=Policy(return_mode="manual"), tilt=False)
     r.m.submit(order(dest="station_b", lines=((10, 3),)))
 
     def worker(m):

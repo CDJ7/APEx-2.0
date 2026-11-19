@@ -10,6 +10,7 @@ Built in the **Simulation Bring-up** stage; see `docs/SIMULATION.md` for the ful
 | [`apex_plc_bridge`](src/apex_plc_bridge/README.md) | ament_python | the only connection to the FlexBase PLC; write allow-list; network profiles |
 | [`apex_cell_sim`](src/apex_cell_sim/README.md) | ament_python | simulated cell with the real tag names and timing |
 | [`apex_orchestrator`](src/apex_orchestrator/README.md) | ament_python | job state machine, loop routing, Nav2 adapter, demos |
+| [`apex_tilt`](src/apex_tilt/README.md) | ament_python | tilting return tray on the TurtleBot: controller + interlocks, `tilt_platform` node (runs on the robot) |
 
 ```
 station GUI ──services──► apex_orchestrator ──NavPort──► Nav2 / TurtleBot 4 (Gazebo or real)
@@ -47,7 +48,7 @@ are generated from the real `.msg`/`.srv` files).
 ```bash
 ros2 launch apex_bringup demo.launch.py scenario:=full        # (a) full order, Gazebo + Nav2
 ros2 launch apex_bringup demo.launch.py scenario:=reroute     # (b) blocked north corridor
-ros2 launch apex_bringup demo.launch.py scenario:=return      # (c) damaged-part return
+ros2 launch apex_bringup demo.launch.py scenario:=return      # (c) damaged-part return (tray tilts into the bin)
 ros2 launch apex_bringup demo.launch.py scenario:=full gazebo:=false   # ROS stack only, kinematic robot
 
 # headless, no ROS at all:

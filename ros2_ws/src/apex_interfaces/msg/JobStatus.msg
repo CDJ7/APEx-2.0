@@ -18,3 +18,4 @@ float32 battery_pct
 bool docked
 float32[] route_xy        # current route waypoints, flattened x0,y0,x1,y1,...
 float32[] blocked_xy      # remembered corridor blockages, flattened
+string tilt_state         # tilt tray: UNKNOWN | FLAT | TILTING | RAMP | RETURNING | FAULT | "" (none)

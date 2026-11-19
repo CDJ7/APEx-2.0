@@ -227,9 +227,11 @@ def install() -> Bus:
     std = types.ModuleType("std_msgs.msg")
     std.String = _make("String", {"data": "string"})
     msg_mod, srv_mod = build_interfaces()
+    nav = types.ModuleType("nav_msgs.msg")
+    nav.Odometry = type("Odometry", (), {})
     pkg = types.ModuleType("apex_interfaces")
     pkg.msg, pkg.srv = msg_mod, srv_mod
-    sys.modules.update({"rclpy": rclpy, "rclpy.node": node_mod, "std_msgs": types.ModuleType("std_msgs"),
+    sys.modules.update({"nav_msgs": types.ModuleType("nav_msgs"), "nav_msgs.msg": nav, "rclpy": rclpy, "rclpy.node": node_mod, "std_msgs": types.ModuleType("std_msgs"),
                         "std_msgs.msg": std, "apex_interfaces": pkg, "apex_interfaces.msg": msg_mod,
                         "apex_interfaces.srv": srv_mod})
     return BUS
@@ -238,5 +240,6 @@ def install() -> Bus:
 def uninstall() -> None:
     for m in ["rclpy", "rclpy.node", "std_msgs", "std_msgs.msg", "apex_interfaces", "apex_interfaces.msg",
               "apex_interfaces.srv", "apex_plc_bridge.bridge_node", "apex_orchestrator.orchestrator_node",
+              "apex_tilt.tilt_node", "apex_tilt.ros_port", "nav_msgs", "nav_msgs.msg",
               "apex_orchestrator.demo_client"]:
         sys.modules.pop(m, None)

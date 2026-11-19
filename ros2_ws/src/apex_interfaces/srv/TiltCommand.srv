@@ -1,0 +1,6 @@
+# Tilt-tray command to apex_tilt: dump (flat -> ramp -> hold -> flat), home (back to flat after a
+# fault - robot must be parked), stop (motor off, FAULT).
+string action
+---
+bool ok
+string message
