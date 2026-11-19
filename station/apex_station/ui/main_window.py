@@ -25,9 +25,10 @@ from apex_station.ui.pages.orders import OrdersPage
 from apex_station.ui.pages.quarantine import QuarantinePage
 from apex_station.ui.pages.receiving import ReceivingPage
 from apex_station.ui.pages.robot import RobotCellPage
+from apex_station.ui.pages.sensors import STALE_S, SensorsPage
 from apex_station.ui.widgets import LedLabel, ToastManager, button, confirm, error
 
-NAV = ["Dashboard", "Orders", "Receiving", "Robot & Cell", "Inventory", "Quarantine", "Logs"]
+NAV = ["Dashboard", "Orders", "Receiving", "Robot & Cell", "Sensors", "Inventory", "Quarantine", "Logs"]
 
 
 class MainWindow(QMainWindow):
@@ -63,7 +64,7 @@ class MainWindow(QMainWindow):
         sl.addSpacing(26)
         open_receiving = lambda: self.show_page(NAV.index("Receiving"))  # noqa: E731
         pages: list[Page] = [DashboardPage(self.ctx, open_receiving), OrdersPage(self.ctx), ReceivingPage(self.ctx),
-                             RobotCellPage(self.ctx, open_receiving), InventoryPage(self.ctx),
+                             RobotCellPage(self.ctx, open_receiving), SensorsPage(self.ctx), InventoryPage(self.ctx),
                              QuarantinePage(self.ctx), LogsPage(self.ctx)]
         self.stack = QStackedWidget()
         self.group = QButtonGroup(self)
@@ -114,7 +115,8 @@ class MainWindow(QMainWindow):
         self.led_orch = LedLabel("ORCHESTRATOR")
         self.led_plc = LedLabel("PLC")
         self.led_rest = LedLabel("REST")
-        for w in (self.led_orch, self.led_plc, self.led_rest):
+        self.led_sensors = LedLabel("SENSORS")
+        for w in (self.led_orch, self.led_plc, self.led_sensors, self.led_rest):
             hl.addWidget(w)
             hl.addSpacing(14)
         self.clock = QLabel()
@@ -136,6 +138,7 @@ class MainWindow(QMainWindow):
         sb.addWidget(self.sb_msg, 1)
         sb.addPermanentWidget(QLabel(f"DB {core.db.path}"))
         sb.addPermanentWidget(QLabel(f"link: {core.link.mode}"))
+        sb.addPermanentWidget(QLabel(f"sensors: {self.ctx.sensors.mode if self.ctx.sensors else 'off'}"))
 
         self.group.idClicked.connect(self.show_page)
         self.ctx.bridge.notify.connect(self._notify)
@@ -164,6 +167,15 @@ class MainWindow(QMainWindow):
         self.led_plc.set_state(theme.OK if cell.get("connected") else theme.BAD,
                                "PLC (SIM)" if cell.get("safety_simulated") else "PLC",
                                f"backend {cell.get('backend') or '-'} · read-only mirror")
+        feed = self.ctx.sensors
+        snap = feed.snapshot() if feed is not None else None
+        if snap is None or snap.mode == "off":
+            self.led_sensors.set_state(theme.FAINT, "SENSORS", "no sensor feed (--sensors ros)")
+        else:
+            now = time.time()
+            live = [n for n, f in (("lidar", snap.scan), ("camera", snap.image)) if f and now - f.received < STALE_S]
+            self.led_sensors.set_state(theme.OK if len(live) == 2 else theme.WARN if live else theme.BAD, "SENSORS",
+                                       f"live: {', '.join(live) or 'none'}")
         rest = self.ctx.rest
         if rest is None:
             self.led_rest.set_state(theme.FAINT, "REST", "disabled")

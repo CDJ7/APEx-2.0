@@ -1,26 +1,32 @@
 # Network profile: LAB (isolated APEx router - not connected to the school network).
 #
-# Addresses are PLACEHOLDERS until the lab router is set up; see docs/OPEN_QUESTIONS.md.
+# Router: Netgear DGND3700v2, LAN 192.168.0.1/24, no internet uplink (set up 2026-11-18).
+# TurtleBot and laptop addresses are real and reserved in the router; PLC and KR C4
+# addresses are still [TBD]. Bring-up and recovery: docs/TURTLEBOT_NETWORK.md.
 # Plan: one dedicated router/switch for the station PC, the Compact GuardLogix 5380,
 # the KR C4 compact KLI (X66) and the TurtleBot 4 (Wi-Fi on the same router).
 profile: lab
-subnet: 192.168.50.0/24       # [TBD] lab router
+subnet: 192.168.0.0/24        # Netgear DGND3700v2 factory LAN
+router: 192.168.0.1           # admin page http://192.168.0.1 (also routerlogin.net)
 plc:
   allowed: true
   backend: logix              # pycomm3 -> Compact GuardLogix 5380 (standard task tags only)
-  address: 192.168.50.10      # [TBD] PLC Ethernet port (EtherNet/IP, TCP 44818)
+  address: 192.168.0.10       # [TBD] PLC Ethernet port (EtherNet/IP, TCP 44818); reserve it or shrink the router's DHCP pool first
   timeout_s: 2.0
 kuka:
   allowed: false              # station software never connects to the KR C4; the PLC owns the arm
-  kli_address: 192.168.50.20  # [TBD] X66 KLI - WorkVisual/commissioning laptop only
+  kli_address: 192.168.0.20   # [TBD] X66 KLI - WorkVisual/commissioning laptop only
 turtlebot:
-  ros_domain_id: 7            # [TBD] pick one per team to avoid cross-talk
+  ros_domain_id: 0            # matches the robot's /etc/turtlebot4/setup.bash
   rmw_implementation: rmw_fastrtps_cpp
-  discovery_server: 192.168.50.30:11811   # [TBD] TurtleBot 4 Raspberry Pi discovery server
-  robot_address: 192.168.50.30
+  discovery_server: ""        # "" = simple discovery (multicast) - works on our own router; see ARCHITECTURE.md 7.1
+  robot_address: 192.168.0.3  # Pi wlan0, NETGEAR61-5G, DHCP reservation for D8:3A:DD:08:5B:AC
 station_pc:
-  address: 192.168.50.5       # [TBD]
+  address: 192.168.0.2        # station laptop's USB-Ethernet adapter, wired to a router LAN port (DHCP reservation)
+  ntp_server: true            # the robot has no internet: the Pi syncs its clock from this computer (chrony)
 notes: >
   The safety network (CIP Safety / X11 / PLd circuit) is configured in Studio 5000 and
   WorkVisual by the integrator. Nothing in this repository reads or writes it except the
   read-only status mirror tags the PLC copies into APEX_ToStation.
+  The DGND3700v2 is a consumer router; VLANs between controls and robot traffic are not
+  expected to be available on it (Q-N2).

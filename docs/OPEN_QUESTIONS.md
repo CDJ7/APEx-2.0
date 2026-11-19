@@ -61,7 +61,7 @@ moves to the *Answered* table at the bottom.
 | ID | Question | Current assumption |
 |---|---|---|
 | Q-N1 | School Wi-Fi: WPA2-Enterprise / 802.1X? Client isolation? Can a device be registered by MAC? Is 5 GHz available in the lab? | Assume enterprise and isolated, so ROS traffic goes over our router. |
-| Q-N2 | Router model for the lab network; can it do **VLANs** and firewall rules between them? | VLAN-capable router. |
+| Q-N2 | The lab router is a **Netgear DGND3700v2** (A-13). It is a consumer router and is not expected to do **VLANs** or firewall rules between segments. Do we need a VLAN-capable router or managed switch before the PLC joins? | Separate controls network needed before the PLC is connected. |
 | Q-N3 | Is the router ever allowed to uplink to the school network for internet? | Only the robot VLAN may, and the controls VLAN never routes to WAN. |
 
 ## Process (Q-X)
@@ -121,3 +121,4 @@ moves to the *Answered* table at the bottom.
 | A-10 | **RL navigation policy is approved** ("RL policy is a go") - new stage *Learning-Based Navigation*. | 2026-11-17 |
 | A-11 | The lab is modelled in the **Gazebo simulator** for the TurtleBot's benefit (map + training world). | 2026-11-17 |
 | A-12 | **No work during spring break.** | 2026-11-17 |
+| A-13 | Lab router is a **Netgear DGND3700v2** on `192.168.0.0/24`, no internet. TurtleBot on 5 GHz Wi-Fi at `192.168.0.3`, station laptop wired at `192.168.0.2` (both reserved). See [`TURTLEBOT_NETWORK.md`](TURTLEBOT_NETWORK.md). | 2026-11-18 |

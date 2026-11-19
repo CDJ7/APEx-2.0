@@ -24,6 +24,20 @@ link:
   sim_time_scale: 4.0                  # built-in simulation speed (1 = real time)
   ros_timeout_s: 5.0                   # service call timeout
 
+# Live sensor data from the real TurtleBot 4 for the Sensors page (read-only; independent of link.mode).
+#   off  - no sensor feed (default; runs anywhere)
+#   ros  - subscribe to the robot's lidar + camera over ROS 2 (source /opt/ros/jazzy/setup.bash,
+#          ROS_DOMAIN_ID=0, laptop on the lab router - docs/TURTLEBOT_NETWORK.md)
+sensors:
+  mode: "off"                                    # quoted: plain off is a YAML boolean
+  scan_topic: /scan                              # RPLIDAR A1, ~8-10 Hz
+  image_topic: /oakd/rgb/preview/image_raw       # OAK-D Pro RGB preview, 250x250 bgr8, 30 fps on the robot
+  lidar_start_service: /start_motor              # std_srvs/Empty - robot stops the lidar while docked
+  camera_start_service: /oakd/start_camera       # std_srvs/Trigger - robot stops the camera while docked
+  base_frame: base_link
+  lidar_yaw_deg: 90.0                            # lidar mount, used until /tf_static provides it
+  timeout_s: 5.0
+
 rest:
   enabled: true
   host: 0.0.0.0                        # bind address (lab network); 127.0.0.1 = this PC only

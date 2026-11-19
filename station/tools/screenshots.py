@@ -8,7 +8,9 @@ waits for its receipt, a third hit a load shortfall - so every page has somethin
 
 from __future__ import annotations
 
+import math
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +28,7 @@ from apex_station.config import Config  # noqa: E402
 from apex_station.core.database import Database  # noqa: E402
 from apex_station.core.station import StationCore  # noqa: E402
 from apex_station.links.local_link import LocalJobLink  # noqa: E402
+from apex_station.sensors.feed import ImageFrame, ScanFrame, StaticSensorFeed  # noqa: E402
 from apex_station.ui.bridge import QtBridge  # noqa: E402
 from apex_station.ui.main_window import NAV, MainWindow  # noqa: E402
 from apex_station.ui.pages.base import AppContext  # noqa: E402
@@ -73,6 +76,27 @@ def build_scenario(core: StationCore, link: LocalJobLink) -> None:
     core.create_order("frank", "Station B", [{"part_number": "BLT-M8x25", "quantity": 4}])
 
 
+def sample_sensors() -> StaticSensorFeed:
+    """Synthetic lidar + camera for the Sensors page screenshot (shown as SAMPLE DATA)."""
+    now = time.time()
+    n, ranges = 720, []
+    for i in range(n):                     # 6 m x 4 m room around the robot, in the lidar frame (mounted +90 deg)
+        a = -math.pi + i * 2 * math.pi / n + math.pi / 2
+        c, s = math.cos(a), math.sin(a)
+        r = min(3.0 / abs(c) if abs(c) > 1e-6 else 99, 2.0 / abs(s) if abs(s) > 1e-6 else 99)
+        if 1.2 < a < 1.9:                  # a box 1 m to the left
+            r = min(r, 1.0)
+        ranges.append(r if i % 9 else float("inf"))
+    scan = ScanFrame(now, now, "rplidar_link", -math.pi, 2 * math.pi / n, 0.15, 12.0, tuple(ranges))
+    w = h = 250
+    px = bytearray()
+    for y in range(h):
+        for x in range(w):
+            px += bytes((40 + x * 120 // w, 60 + y * 100 // h, 90))          # BGR gradient
+    img = ImageFrame(now, now, "oakd_rgb_camera_optical_frame", w, h, w * 3, "bgr8", bytes(px))
+    return StaticSensorFeed(scan=scan, image=img, scan_hz=8.6, image_hz=19.0)
+
+
 def main() -> int:
     app = QApplication(sys.argv)
     apply_theme(app)
@@ -82,7 +106,8 @@ def main() -> int:
     core.inventory.seed_demo()
     bridge = QtBridge(core.bus)
     link._on_event, link._on_status = core._on_job_event, core._on_status
-    win = MainWindow(lambda toasts: AppContext(cfg=cfg, core=core, bridge=bridge, toasts=toasts, operator="operator"))
+    win = MainWindow(lambda toasts: AppContext(cfg=cfg, core=core, bridge=bridge, toasts=toasts, operator="operator",
+                                               sensors=sample_sensors()))
     win._skip_confirm = True
     win.resize(1480, 920)
     win.show()

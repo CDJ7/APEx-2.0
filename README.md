@@ -149,7 +149,7 @@ Everything here is a **proposal** to confirm against the real room:
 - **Later (lab router):** an isolated network with a **controls VLAN** (PLC, KR C4 X66) that has **no route to the internet**, and a **robot VLAN** (TurtleBot, station PC).
 - **The PLC and KR C4 are never put on the school network.** Config profiles: `network_school.yaml` and `network_lab.yaml`.
 
-Details: [`docs/ARCHITECTURE.md` §7](docs/ARCHITECTURE.md#7-network).
+Details: [`docs/ARCHITECTURE.md` §7](docs/ARCHITECTURE.md#7-network). Connecting to the real TurtleBot over the lab router: [`docs/TURTLEBOT_NETWORK.md`](docs/TURTLEBOT_NETWORK.md).
 
 ## 7. Repository layout
 
@@ -159,6 +159,7 @@ apex-2.0/
 ├── docs/
 │   ├── ROADMAP.md               stages, calendar, Learning-Based Navigation plan
 │   ├── SIMULATION.md            how to run tests, headless demos and Gazebo + Nav2 demos
+│   ├── TURTLEBOT_NETWORK.md     real TurtleBot on the lab router: quick start, sensors in the GUI, time sync, recovery
 │   ├── evidence/                recorded demo runs
 │   ├── AUDIT.md                 Keep / Adapt / Retire audit of the old design
 │   ├── ARCHITECTURE.md          components, KUKA control path, network, safety rules
@@ -201,6 +202,7 @@ git clone https://github.com/CDJ7/apex-2.0.git
 cd apex-2.0
 python3 -m pip install -r station/requirements.txt
 (cd station && python3 -m apex_station.app)                         # station HMI, simulated system
+(cd station && python3 -m apex_station.app --sensors ros)           # + live lidar/camera from the real TurtleBot
 python3 -m pytest ros2_ws station/tests -q                          # all tests
 cd ros2_ws && PYTHONPATH=$(ls -d src/apex_* | tr '\n' ':') python3 -m apex_orchestrator.demo all
 ```
@@ -234,6 +236,7 @@ python3 tools/draw_lab_layout.py    # needs matplotlib; regenerates docs/img/lab
 |---|---|
 | [ROADMAP](docs/ROADMAP.md) | The stages, what each delivers, the calendar, the Learning-Based Navigation plan |
 | [SIMULATION](docs/SIMULATION.md) | Running the tests, headless demos and Gazebo + Nav2 demos; how the simulation is built; what still needs testing |
+| [TURTLEBOT_NETWORK](docs/TURTLEBOT_NETWORK.md) | **Connecting to the real TurtleBot:** quick start, addresses, laptop setup, the station GUI's Sensors page, time sync chain, every change made on the robot, troubleshooting |
 | [ros2_ws README](ros2_ws/README.md) | The ROS 2 packages, each with its own detailed README |
 | [station README](station/README.md) | The station HMI: pages, order flow and inventory booking, safety notes, REST API, configuration |
 | [AUDIT](docs/AUDIT.md) | Every old module classified Keep / Adapt / Retire, with reasons |
