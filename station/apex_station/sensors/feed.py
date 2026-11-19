@@ -144,6 +144,9 @@ class SensorFeed:
     def snapshot(self) -> SensorSnapshot:
         return SensorSnapshot(mode=self.mode)
 
+    def set_camera_enabled(self, enabled: bool) -> None:
+        """Receive camera frames only while someone is looking (raw images are heavy on Wi-Fi)."""
+
     def start_lidar(self) -> str:
         raise SensorError("no sensor feed - start the station with --sensors ros")
 
@@ -161,7 +164,11 @@ class StaticSensorFeed(SensorFeed):
     image_hz: float = 0.0
     lidar_yaw: float = math.radians(90.0)
     requests: list[str] = field(default_factory=list)
+    camera_enabled: bool = False
     mode = "static"
+
+    def set_camera_enabled(self, enabled: bool) -> None:
+        self.camera_enabled = enabled
 
     def __post_init__(self) -> None:
         self._lock = threading.Lock()

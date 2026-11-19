@@ -129,6 +129,18 @@ def test_sensors_page_without_feed_explains_how_to_enable(qapp, sim):
     assert not page.btn_lidar.isEnabled() and not page.btn_camera.isEnabled()
 
 
+def test_camera_streams_only_while_page_is_visible(qapp, sim):
+    feed = _sample_feed()
+    page, _ = _page(sim, feed)
+    assert feed.camera_enabled is False
+    page.show()
+    qapp.processEvents()
+    assert feed.camera_enabled is True
+    page.hide()
+    qapp.processEvents()
+    assert feed.camera_enabled is False
+
+
 def test_start_buttons_call_the_feed(qapp, sim):
     from PySide6.QtCore import QThreadPool
     feed = _sample_feed()

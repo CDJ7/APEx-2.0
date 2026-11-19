@@ -5,6 +5,11 @@ Subscribes (best-effort, sensor-data QoS) to the scan and image topics and to ``
 :meth:`snapshot`. Runs in its **own** rclpy context and executor thread, so it never
 interferes with the job link's node.
 
+Bandwidth: the camera is subscribed only while the Sensors page is open
+(:meth:`set_camera_enabled`). Raw 250x250 frames at 30 fps (~45 Mbit/s) saturate the robot's
+Wi-Fi and stall everything else (SSH, services); the robot's camera runs at 10 fps for this
+reason (docs/TURTLEBOT_NETWORK.md).
+
 Requests: ``start_lidar`` (``/start_motor``, std_srvs/Empty) and ``start_camera``
 (``/oakd/start_camera``, std_srvs/Trigger). The TurtleBot 4 stops both sensors while docked
 (``power_saver``) and on undock does not always start them again - these are the recovery
@@ -50,6 +55,8 @@ class RosSensorFeed(SensorFeed):
         self._scan_rate, self._image_rate = RateMeter(), RateMeter()
         self._tf_parents: dict[str, tuple[str, float]] = {}
         self._error = ""
+        self._want_camera = False
+        self._image_sub = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._ctx = self._node = self._executor = None
@@ -71,8 +78,10 @@ class RosSensorFeed(SensorFeed):
         rclpy.init(context=self._ctx)
         n = self._node = rclpy.create_node(self.node_name, context=self._ctx)
         n.create_subscription(LaserScan, self.scan_topic, self._on_scan, qos_profile_sensor_data)
-        n.create_subscription(Image, self.image_topic, self._on_image,
-                              QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT))
+        # The camera subscription is created only while the Sensors page is open (set_camera_enabled):
+        # raw images are ~1.5 Mbit per frame and at 30 fps they fill the robot's Wi-Fi link.
+        self._image_type = Image
+        self._image_qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)
         n.create_subscription(TFMessage, "/tf_static", self._on_tf_static,
                               QoSProfile(depth=100, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                                          reliability=ReliabilityPolicy.RELIABLE))
@@ -84,9 +93,23 @@ class RosSensorFeed(SensorFeed):
         self._thread.start()
         log.info("sensor feed started: %s, %s", self.scan_topic, self.image_topic)
 
+    def set_camera_enabled(self, enabled: bool) -> None:
+        self._want_camera = enabled          # applied on the spin thread
+
+    def _sync_camera(self) -> None:
+        if self._want_camera and self._image_sub is None:
+            self._image_sub = self._node.create_subscription(self._image_type, self.image_topic, self._on_image,
+                                                             self._image_qos)
+            log.info("camera stream on (%s)", self.image_topic)
+        elif not self._want_camera and self._image_sub is not None:
+            self._node.destroy_subscription(self._image_sub)
+            self._image_sub = None
+            log.info("camera stream off")
+
     def _spin(self) -> None:
         while not self._stop.is_set() and self._ctx.ok():
             try:
+                self._sync_camera()
                 self._executor.spin_once(timeout_sec=0.1)
             except Exception as exc:  # noqa: BLE001 - keep the GUI alive, report on the page
                 self._error = f"sensor feed: {exc}"
@@ -149,8 +172,9 @@ class RosSensorFeed(SensorFeed):
         fut = client.call_async(srv.Request())
         fut.add_done_callback(lambda _f: done.set())
         if not done.wait(self.timeout_s * 3):
-            raise SensorError(f"{client.srv_name}: no reply within {self.timeout_s * 3:.0f} s. If this keeps "
-                              "happening the driver is stuck - restart the robot's ROS software "
+            raise SensorError(f"{client.srv_name}: no reply within {self.timeout_s * 3:.0f} s. The camera "
+                              "driver does not answer a start request while it is already running - if no "
+                              "frames arrive either, restart the robot's ROS software "
                               "(sudo systemctl restart turtlebot4).")
         res = fut.result()
         if hasattr(res, "success") and not res.success:

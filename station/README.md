@@ -69,7 +69,8 @@ cd ~/APEx-2.0/station
 python -m apex_station.app --sensors ros       # works with the built-in simulation link too
 ```
 
-The laptop must be on the lab router with the robot on Wi-Fi and undocked - see
+The camera is subscribed only while the Sensors page is open (raw images are heavy on Wi-Fi).
+The laptop must be on the lab router with the robot on Wi-Fi - see
 [`docs/TURTLEBOT_NETWORK.md`](../docs/TURTLEBOT_NETWORK.md) for setup, the time sync and
 troubleshooting. The sensor feed is independent of the job link and needs no orchestrator.
 
@@ -239,9 +240,9 @@ python -m pytest station/tests -q        # 29 tests, ~10 s; GUI tests run offscr
 ## 9. Needs testing with ROS / hardware
 
 * `RosJobLink` against a real ROS 2 graph (only tested with the rclpy stand-in so far).
-* `RosSensorFeed` (Sensors page) with the real TurtleBot: on 2026-11-18 it received and drew
-  real lidar scans (459/720 valid points, clock offset -0.10 s) before the robot dropped off the
-  network; the camera view and the Start buttons still need a run with the robot online.
+* `RosSensorFeed` (Sensors page) was verified with the real TurtleBot on 2026-11-18: camera
+  10.0 fps, lidar 7.6 Hz, clock offsets under 0.1 s, 0% ping loss while streaming. The Start
+  buttons have only been exercised against the sample feed and the robot's services by CLI.
 * The station GUI next to Gazebo (`--link ros`) for demos (a)-(c).
 * Touch-screen use at the station PC (button sizes), and the workstation laptop over the lab
   network with `rest.allowed_ips` set.

@@ -217,6 +217,15 @@ class SensorsPage(Page):
         run_in_background(fn, lambda msg: self.ctx.toast("success", f"{what.title()}: {msg}"),
                           lambda msg: self.ctx.toast("error", f"{what.title()} not started: {msg}"))
 
+    # ------------------------------------------------------------------ camera only while visible
+    def showEvent(self, e) -> None:  # noqa: N802
+        super().showEvent(e)
+        self.feed.set_camera_enabled(True)
+
+    def hideEvent(self, e) -> None:  # noqa: N802
+        super().hideEvent(e)
+        self.feed.set_camera_enabled(False)
+
     # ------------------------------------------------------------------ live update
     def _poll(self) -> None:
         if self.isVisible():
@@ -266,8 +275,8 @@ class SensorsPage(Page):
                                   f"{snap.image_hz:.1f} fps" if img else "no frames")
         if img is None:
             self.camera.set_image(None, "No camera image" if off else
-                                  "No camera image yet.\nUndocked? The robot stops the camera on the dock - "
-                                  "press Start camera.")
+                                  "No camera image yet (the robot's camera takes ~1-2 min to start).\n"
+                                  "Still nothing? Press Start camera - see docs/TURTLEBOT_NETWORK.md.")
             for w in (self.c_rate, self.c_age, self.c_clock, self.c_size):
                 w.setText("-")
                 w.setStyleSheet("")
@@ -295,7 +304,7 @@ class SensorsPage(Page):
                                  f"{snap.scan_hz:.1f} Hz" if scan else "no scans")
         if scan is None:
             self.lidar.set_points([], True, "No lidar data" if off else
-                                  "No scans yet. Undocked? The robot stops the lidar on the dock - press Start lidar.")
+                                  "No scans yet. Robot on the network? If so, press Start lidar.")
             for w in (self.l_rate, self.l_age, self.l_clock, self.l_pts, self.l_near):
                 w.setText("-")
                 w.setStyleSheet("")

@@ -12,8 +12,8 @@ stops working. Set up and tested on 2026-11-18 (robot image v2.0.2, ROS 2 Jazzy)
 2. **Robot:** power it on with the laptop already on the router. The robot gets its time
    from the laptop at boot. Wait for the chime; the top line of its screen shows
    `192.168.0.3`. If it shows `unknown`, see [Troubleshooting](#troubleshooting).
-3. **Undock it** (or lift it off the dock). The robot turns the lidar and camera **off while
-   docked**.
+3. The lidar and camera run on and off the dock (the dock power saver is turned off, see
+   [Changes made on the robot](#changes-made-on-the-robot-2026-11-18)).
 4. **Terminal check:**
 
    ```bash
@@ -33,7 +33,8 @@ stops working. Set up and tested on 2026-11-18 (robot image v2.0.2, ROS 2 Jazzy)
    python -m apex_station.app --sensors ros          # open the "Sensors" page (Ctrl+5)
    ```
 
-   If a sensor shows no data, press **Start lidar** / **Start camera** on that page.
+   Close the GUI or leave the Sensors page when you don't need the camera. The camera stream
+   is the heaviest thing on the Wi-Fi link.
 
 ## Addresses
 
@@ -109,7 +110,7 @@ Measured over Wi-Fi on 2026-11-18:
 | `/scan` | 8.6-10 Hz | RPLIDAR A1, frame `rplidar_link`, mounted **+90°** to `base_link` |
 | `/odom` | 20 Hz | |
 | `/imu` | 33 Hz | |
-| `/oakd/rgb/preview/image_raw` | ~19 fps (30 on the robot) | 250x250 `bgr8`, ~3.6 MB/s uncompressed. Wi-Fi does not carry all 30 fps. |
+| `/oakd/rgb/preview/image_raw` | 10 fps (all of them) | 250x250 `bgr8`, ~1.9 MB/s uncompressed. The camera was lowered from 30 fps; at 30 fps it saturated the Wi-Fi (see Findings). |
 | `/battery_state`, `/dock_status` | 1 Hz-ish | |
 
 ### Station GUI - Sensors page
@@ -123,13 +124,16 @@ need the orchestrator.
   nearest obstacle with bearing. The mount rotation is read from `/tf_static`, otherwise 90°.
 - **Clock offset** (robot stamp minus laptop time). It turns red above 1 s and says when the
   robot's clock is wrong. If you see days or years here, the time sync below has failed.
+- The camera is received **only while the Sensors page is open**, to keep the Wi-Fi link free.
 - **Start lidar / Start camera** call `/start_motor` and `/oakd/start_camera`. They only
-  power the sensors and **never move the robot**.
+  power the sensors and **never move the robot**. With the power saver off they should not be
+  needed. The camera driver does not answer a start request while it is already running.
 - Header LED **SENSORS**: green = both live, amber = one live, red = none.
 
 ![Sensors page](img/station_5_sensors.png)
 
-*(Screenshot uses the built-in sample data; with the robot it shows the real camera and scan.)*
+*(Screenshot uses the built-in sample data. Verified with the real robot on 2026-11-18:
+camera 10.0 fps, lidar 7.6 Hz, clock offsets -0.08 s / -0.01 s, 0% ping loss while streaming.)*
 
 ## Time sync
 
@@ -166,21 +170,32 @@ ssh ubuntu@192.168.0.3 chronyc tracking        # "Reference ID : C0A80002 (192.1
 | Create 3 ntpd accepts large jumps | Create 3 web UI → Edit ntp.conf (`tinker panic 0`) | remove the line |
 | Create 3 resync after boot | `crontab -l` (user `ubuntu`), `~/create3-timesync.sh` | `crontab -e` |
 | Laptop SSH key | `~ubuntu/.ssh/authorized_keys` | remove the line |
+| Camera 10 fps (`rgb.i_fps: 10.0`, was 30) | `/opt/ros/jazzy/share/turtlebot4_bringup/config/oakd_pro.yaml`, via `sudo ~/set-camera-fps.sh` | `~ubuntu/oakd_pro.yaml.bak` |
+| Dock power saver off (`power_saver: false`): lidar and camera keep running on the dock | `/opt/ros/jazzy/share/turtlebot4_bringup/config/turtlebot4.yaml`, via `sudo ~/power-saver-off.sh` | `~ubuntu/turtlebot4.yaml.bak` |
+
+The two `/opt/ros/...` files belong to the TurtleBot packages: **an `apt upgrade` on the robot
+resets them**. Re-run `sudo ~/set-camera-fps.sh` and `sudo ~/power-saver-off.sh` afterwards.
 
 Not changed: ROS settings (`/etc/turtlebot4/setup.bash`: `ROS_DOMAIN_ID=0`,
-`rmw_fastrtps_cpp`, simple discovery) and the dock power saver (`power_saver: true`).
+`rmw_fastrtps_cpp`, simple discovery).
+
+Sudo commands must be run in a normal terminal (`ssh -t ubuntu@192.168.0.3 'sudo ...'`). The
+Claude Code `!` prompt cannot ask for the password.
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| Robot shows `192.168.0.3` but pings fail or take seconds, SSH times out, GUI buttons get no reply - only while a camera viewer runs | Raw camera images saturate the Wi-Fi link | Camera must be at 10 fps (`grep i_fps .../oakd_pro.yaml`), re-run `sudo ~/set-camera-fps.sh` after updates; close camera viewers you don't need |
+| Robot shows `192.168.0.3` but nothing answers, even with no viewer running | Router not passing the robot's traffic | Power-cycle the router (off 10 s, wait ~2 min) |
 | Robot screen shows `unknown`, laptop can't ping `192.168.0.3` | Router stopped answering the Pi after many failed connection attempts (Pi log: `ASSOC-REJECT ... status_code=16`, on **both** bands) | **Power-cycle the router** (off 10 s). Then, if needed, see the cable recovery below. |
 | Same, after a router restart | Wi-Fi gave up | Cable the laptop into the robot, `ssh ubuntu@192.168.185.3`, then `nmcli con up netplan-wlan0-NETGEAR61-5G` (no sudo needed). Logs: `journalctl -b -u wpa_supplicant \| tail -20`. |
 | 5 GHz fails only right after power-on | Wi-Fi country not set (`cat /sys/module/cfg80211/parameters/ieee80211_regdom` shows `00`) | Check `cfg80211.ieee80211_regdom=US` is still in `/boot/firmware/cmdline.txt` |
-| `/scan` or camera silent after undocking | Dock power saver stopped them and did not start them again | **Start lidar / Start camera** on the Sensors page, or `ros2 service call /start_motor std_srvs/srv/Empty "{}"` |
+| `/scan` or camera silent | Power saver back on after a package update, or a sensor stopped | Check `power_saver:` in `.../turtlebot4.yaml`; **Start lidar / Start camera** on the Sensors page, or `ros2 service call /start_motor std_srvs/srv/Empty "{}"` |
 | Camera start does nothing; a `component_container` on the robot sits at 100% CPU | OAK-D driver hung on start-after-stop | `ssh -t ubuntu@192.168.0.3 'sudo systemctl restart turtlebot4'` with the robot **off the dock** (restarts the robot's ROS nodes, not Wi-Fi or clocks) |
 | Timestamps years off (*Clock offset* red) | Pi booted without the laptop on the router, or laptop chrony not serving | Laptop on the router, `chronyc tracking` on the Pi; then full power-cycle the robot |
 | Only the base topics (`/odom`, `/imu`, ...) are years off | Create 3 synced before the Pi did | From the Pi: `curl -X POST http://192.168.186.2/api/restart-ntpd` (the boot job normally does this) |
+| GUI says a service is "not available" | Laptop cable plugged into the **robot** instead of the router (laptop has only `192.168.185.10`) | Cable into a router LAN port |
 | `ssh ... Network is unreachable` with the cable in the robot | Laptop wired profile has no address | Re-apply step 4 of the one-time setup |
 | `sudo reboot` on the Pi did not fix the base | The Pi reboot does not restart the Create 3 | **Full power-cycle:** lift off the dock, hold the power button ~10 s until the light ring goes out, put it back on the dock |
 
@@ -199,13 +214,18 @@ command (highlighted by default), not the robot's state.
   ignored it, which also took out 2.4 GHz until the router was restarted.
 - The DGND3700v2 is a consumer router and is not expected to do VLANs (Q-N2 in
   [`OPEN_QUESTIONS.md`](OPEN_QUESTIONS.md)).
-- Raw camera images over Wi-Fi arrive at ~19 of 30 fps. Use compressed images or process
-  on the robot if a higher rate is needed.
+- **Raw camera images at 30 fps (~45 Mbit/s) saturated the robot's Wi-Fi.** The laptop
+  received only ~19 fps, and while any viewer was subscribed, ping to the robot showed 82% loss
+  with 12-27 s delays. SSH, ROS services and the GUI's buttons all timed out, so the robot
+  looked like it had dropped off the network. At 10 fps the link stays at 0% loss (~14 ms)
+  while streaming. For more frames, use compressed images or process on the robot.
+- The dock power saver stopped the lidar and camera on every dock, did not always start them
+  again on undock, and the OAK-D driver hung when restarted. It is now off.
+- The robot's Wi-Fi power saving is still on (`/etc/NetworkManager/conf.d/default-wifi-powersave-on.conf`).
+  It was not the cause of the stalls above. Turn it off if latency spikes come back.
 
 ## Still open
 
-- **Dock power saver:** consider `power_saver: false` in
-  `/opt/ros/jazzy/share/turtlebot4_bringup/config/turtlebot4.yaml` (sudo; reset by package
-  updates) so the lidar and camera are never stopped. Cost: they run while charging.
+- **Package updates on the robot** reset the camera fps and power saver (re-run the two scripts).
 - **PLC / KR C4 addresses** on this router are still `[TBD]`. Reserve them, or shrink the
   router's DHCP pool, before those devices are connected.
