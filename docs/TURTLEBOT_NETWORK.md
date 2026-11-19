@@ -35,6 +35,9 @@ stops working. Set up and tested on 2026-11-18 (robot image v2.0.2, ROS 2 Jazzy)
 
    Close the GUI or leave the Sensors page when you don't need the camera. The camera stream
    is the heaviest thing on the Wi-Fi link.
+6. **Drive it with the keyboard** (robot on the floor):
+   `python3 ~/APEx-2.0/station/tools/teleop_wasd.py`. See
+   [Driving with the keyboard](#driving-with-the-keyboard-w-a-s-d).
 
 ## Addresses
 
@@ -134,6 +137,34 @@ need the orchestrator.
 
 *(Screenshot uses the built-in sample data. Verified with the real robot on 2026-11-18:
 camera 10.0 fps, lidar 7.6 Hz, clock offsets -0.08 s / -0.01 s, 0% ping loss while streaming.)*
+
+### Driving with the keyboard (W A S D)
+
+**Put the robot on the floor, in a clear area, and watch it.** This is a software control, not
+an emergency stop. Lifting the robot stops the wheels, and the Create 3's cliff and bump
+safety stays on.
+
+```bash
+source /opt/ros/jazzy/setup.bash
+export ROS_DOMAIN_ID=0 RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+python3 ~/APEx-2.0/station/tools/teleop_wasd.py        # add --dry-run to try the keys without ROS
+```
+
+| Key | Action |
+|---|---|
+| `w` / `s` | forward / backward |
+| `a` / `d` | turn left / right on the spot |
+| `q` / `e` | curve forward-left / forward-right |
+| `space` or `x` | stop now |
+| `+` / `-` | faster / slower |
+| `Esc` or `Ctrl-C` | stop and quit |
+
+- **Hold to drive:** the robot stops about 0.6 s after you let go of the key.
+- **Speed:** starts at 0.2 m/s and 1.0 rad/s, capped at the Create 3's 0.306 m/s and 1.9 rad/s.
+- **Messages:** it publishes `geometry_msgs/TwistStamped` on `/cmd_vel`, the Jazzy TurtleBot 4 format, and sends zero velocity when it exits.
+- **Check the connection:** the status line shows `listeners 1` when the robot is receiving.
+- **Leaving the dock:** back off it with `s`.
+- **Don't use two drivers at once:** keep the Sensors page's camera off, or the GUI closed, if the Wi-Fi feels laggy while driving. Don't drive with a joystick at the same time.
 
 ## Time sync
 

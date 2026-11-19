@@ -219,13 +219,16 @@ station/
 │   └── ui/                  theme, widgets, bridge, map_view, actions, main_window, pages/*
 ├── config/station.yaml
 ├── tests/                   pytest: flow, REST, GUI (offscreen), ROS link (rclpy stand-in)
-└── tools/screenshots.py     renders docs/img/station_*.png
+└── tools/
+    ├── screenshots.py       renders docs/img/station_*.png
+    └── teleop_wasd.py       drive the real TurtleBot from the laptop keyboard (W A S D) - see
+                             docs/TURTLEBOT_NETWORK.md, "Driving with the keyboard"
 ```
 
 ## 8. Tests
 
 ```bash
-python -m pytest station/tests -q        # 29 tests, ~10 s; GUI tests run offscreen
+python -m pytest station/tests -q        # 34 tests, ~10 s; GUI tests run offscreen
 ```
 
 * `test_station_flow.py` - full order, receipt rules, damaged return to quarantine, shortfall
@@ -234,6 +237,7 @@ python -m pytest station/tests -q        # 29 tests, ~10 s; GUI tests run offscr
 * `test_gui.py` - every page builds; receiving page closes an order; Robot & Cell shows a fault.
 * `test_sensors.py` - scan geometry and lidar mount yaw, rate meter, config modes; the Sensors
   page with sample data (live values, wrong-clock warning, no-feed notice, start buttons).
+* `test_teleop_wasd.py` - keyboard teleop: key directions, hold-to-drive stop, space/Esc, speed limits.
 * `test_ros_link.py` - the station's ROS link against the **real** orchestrator and PLC-bridge
   nodes (rclpy stand-in from `ros2_ws/tests/ros_fakes.py`, real cell simulator over TCP).
 
