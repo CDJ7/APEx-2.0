@@ -10,10 +10,13 @@ never numbered.
 | **Simulation Bring-up** | Everything runs with no hardware. | `ros2_ws/` (`apex_interfaces`, `apex_bringup`, `apex_plc_bridge`, `apex_cell_sim`, `apex_orchestrator`); Gazebo model of the lab generated from `lab.yaml`; Nav2 map; network profiles; demos (a) full order, (b) blocked corridor → reroute, (c) damaged-part return. See [`SIMULATION.md`](SIMULATION.md). | ✅ Built. Headless demos and tests pass; the Gazebo + Nav2 run is still to be done on the team's Ubuntu 24.04 machine. |
 | **Station HMI Upgrade** | Adapt the old station GUI to the new system. | [`station/`](../station/README.md): PySide6 HMI (dashboard, orders + job timeline, receiving, Robot & Cell with live map and read-only cell/KUKA mirror, inventory with PLC part codes, quarantine & discrepancies, logs); StationCore books every orchestrator event; built-in simulation (runs anywhere) and ROS 2 link; REST API kept. **Ignition** is the FlexBase HMI, so cell control is not duplicated here. | ✅ **Built - awaiting checkpoint review.** 20 station tests pass (GUI offscreen, REST, ROS link against the real nodes via an rclpy stand-in). Needs a run against a real ROS graph. |
 | **Learning-Based Navigation** | Train and evaluate an RL navigation policy in the Gazebo model of the lab (team decision: "RL policy is a go"). | Training environment built from `lab.yaml`; policy + training scripts; evaluation against the Nav2 baseline; a safe way to run it on the robot. Plan below. | Next |
-| **Integration Documentation** | Everything needed to commission the real hardware. | `TURTLEBOT4_SETUP.md`, `PLC_INTEGRATION.md` (incl. Ignition tag ownership), `KUKA_INTEGRATION.md`, `TRANSFER_STATION.md` (gravity chute), `BIN_FIXTURE.md` | Planned |
+| **Integration Documentation** | Everything needed to commission the real hardware. | `TURTLEBOT4_SETUP.md`, `PLC_INTEGRATION.md` (incl. Ignition tag ownership), `KUKA_INTEGRATION.md`, `TRANSFER_STATION.md` → design now in [`TRANSFER_AND_RETURN.md`](TRANSFER_AND_RETURN.md) (chute, funnel, tilting tray), `BIN_FIXTURE.md` (tray build) | Planned |
 
-Damaged-part handling (return mechanism, any second arm) is **deferred** by team decision.
-The software keeps the simple operator-emptied return trip so the receipt data stay complete.
+**Design change 2026-11-19:** the KUKA drops parts into a gravity chute and a funnel puts
+them on the robot's tray (no conveyor); damaged parts return on a **motorised tilting tray**
+that slides them into a bin next to the FlexBase (no second arm). Software for both is built
+and simulated ([`TRANSFER_AND_RETURN.md`](TRANSFER_AND_RETURN.md)). What is left for the
+TurtleBot, in order: [`TURTLEBOT_STATUS.md`](TURTLEBOT_STATUS.md).
 
 ## Calendar
 

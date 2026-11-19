@@ -16,14 +16,14 @@ ISO 14120 (guards), ISO 3691-4 (driverless trucks) and ANSI/A3 R15.08
 
 | ID | Hazard area | Why it needs assessment | Where it is referenced |
 |---|---|---|---|
-| RA-01 | **Arm danger zone vs conveyor exit opening** | The guarding must contain workspace + stopping distance (KUKA §5.3). The conveyor leaves the cell through an opening; it must not let a hand or arm reach the danger zone. | ARCHITECTURE §3.4, OPEN_QUESTIONS Q-K4 |
+| RA-01 | **Arm danger zone vs the chute's opening in the guarding** | The guarding must contain workspace + stopping distance (KUKA §5.3). The chute passes through the east guard panel: the opening must not let a hand reach the danger zone (ISO 13857 opening size vs distance; hood / tunnel). | ARCHITECTURE §3.6, TRANSFER_AND_RETURN §1.2 |
 | RA-02 | **Stopping distances** of the KR 6 with gripper and part | Measure with safety stop 0 and 1 at operating temperature (KUKA §5.3.1). Input to RA-01. | KUKA_INTEGRATION (later stage) |
 | RA-03 | **Operator-safety acknowledge** | Must be a manual button **outside** the guarding, with no auto-acknowledge on gate close (KUKA §5.5.4, §5.6.7). | ARCHITECTURE §3.4 |
 | RA-04 | **Ethernet safety and controller switch-off** | With CIP Safety, switching the KR C4 off does not E-STOP the overall system; the smartPAD E-STOP stops working when the controller is off (KUKA §5.5.6). | ARCHITECTURE §3.4 |
 | RA-05 | **External E-STOP coverage** | Every operator station able to start motion needs an E-STOP; at least one external E-STOP (KUKA §5.5.7). Includes the transfer station and the delivery stations? | PLC_INTEGRATION (later stage) |
 | RA-06 | **Single point of control** | PLC and remote tools must not write safety-relevant signals or `$OV_PRO` in T1/T2; WorkVisual must not modify programs in test modes (KUKA §5.8.9). Our bridge has a write allow-list. | ARCHITECTURE §3.3, §3.4 |
-| RA-07 | **Transfer station: pusher** | Pneumatic pusher outside the guarding: pinch / impact hazard to the operator's hands. | ARCHITECTURE §3.6, TRANSFER_STATION (later stage) |
-| RA-08 | **Transfer station: chute and falling parts** | Parts falling from conveyor height; pinch points between chute, bin and robot. | ARCHITECTURE §3.6, JOB_STATE_MACHINE §6 |
+| RA-07 | ~~Transfer station: pusher~~ | No pusher in transfer mode D (2026-11-19). Re-open if mode A is ever used. | - |
+| RA-08 | **Chute and funnel: falling parts** | Parts sliding down the chute and dropping through the funnel onto the tray; pinch points between funnel, chute support and robot; a hand under the funnel. | TRANSFER_AND_RETURN §1, §3 |
 | RA-09 | **TurtleBot near people** | Mobile robot in corridors shared with people (0.31 m/s, Create 3 bump/cliff). ISO 3691-4 / R15.08 considerations. | ARCHITECTURE §3.5 |
 | RA-10 | **Reaching into bins** | Worker at a delivery station and operator at the return pose reach into bins; the robot must be stopped and held (no motion command) during those steps. | JOB_STATE_MACHINE §6 |
 | RA-11 | **Keepout zone is not a safety function** | Nav2 keepout zones only guide planning; the safety argument must not rely on them. | ARCHITECTURE §3.5 |
@@ -35,3 +35,7 @@ ISO 14120 (guards), ISO 3691-4 (driverless trucks) and ANSI/A3 R15.08
 | RA-17 | **Two HMIs on one cell (Ignition + station GUI)** | Two screens that can request cell actions could conflict. Each request bit has exactly one owner, safety resets stay on the hardwired acknowledge button, and the station GUI shows only a read-only cell summary. | ARCHITECTURE §3.1a |
 | RA-18 | **Gravity chute drop** | Free fall of parts into the bin: drop height, part damage, parts bouncing out of the bin, and a hand in the bin while the stop station could release. The PLC must only release with the robot confirmed in position and no operator request active. | ARCHITECTURE §3.6, `lab.yaml` chute |
 | RA-19 | **Software STOP mistaken for an emergency stop** | The station's STOP button (and F12) faults the job and halts the robot through software. It is not a safety function and is labelled so; the hardware E-stops remain the emergency means. Training and signage needed. | station/README §4 |
+| RA-20 | **Chute opening in the guarding** | Same as RA-01, listed separately because it is new with transfer mode D: the KUKA must release parts only inside the guarding, and nothing may reach in through the chute. | TRANSFER_AND_RETURN §1.2 |
+| RA-21 | **Tilting tray on the robot** | Pinch points at the hinge and the bin rim; the robot driving with the tray tilted; the tray tilting while someone's hand is on it at a station. Interlocks both ways in software (tray only tilts with the robot still, robot only drives with the tray flat), plus the microcontroller's own limit-switch stop and watchdog. | TRANSFER_AND_RETURN §2, apex_tilt README |
+| RA-22 | **Tray motor power on the robot** | A motor on the TurtleBot's battery: fuse, wiring, stall current above the 300-500 mA user rails, battery protection. | TRANSFER_AND_RETURN §2.3 |
+

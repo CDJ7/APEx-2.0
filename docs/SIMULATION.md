@@ -2,7 +2,8 @@
 
 **Stage:** Simulation Bring-up. Everything in APEx 2.0 can run with **no hardware**: a Gazebo
 model of the lab, a simulated TurtleBot 4 running Nav2, `apex_cell_sim` standing in for the
-FlexBase PLC + KUKA + conveyor + gravity chute, and the real orchestrator and PLC bridge.
+FlexBase PLC + KUKA + gravity chute (transfer mode D), a simulated tilting return tray, and
+the real orchestrator and PLC bridge.
 
 There are three ways to run it, from lightest to complete:
 
@@ -49,7 +50,7 @@ It runs the cell 20× faster than real time.
 |---|---|---|
 | `full` | 3 parts (2 lines) to station A | `plc_ack` → `undock` → `route` → `arrived transfer_staging` → `loading_started` → 3 × `part_counted` → `load_complete` → `route station_a` → `receipt_confirmed` → `job_done` → `docked` |
 | `reroute` | north corridor blocked by `barrier_north` | `direction_blocked … counter-clockwise` → `rerouting … clockwise`; the later trip to the dock also avoids the blocked point |
-| `return` | worker reports 1 damaged part at station B | `receipt_confirmed` with `damaged: 1` → `route return_drop` → `return_confirmed` → dock |
+| `return` | worker reports 1 damaged part at station B | `receipt_confirmed` with `damaged: 1` → `route return_drop` → `return_dump_started` → `return_dumped` (tray tilted into the bin) → dock |
 | `shortfall` | the chute photoeye never sees part 2 (`lost_part`) | PLC `COUNT_MISMATCH` → `load_shortfall` (robot waits) → operator *send* → delivery with the missing unit recorded as **not loaded** |
 
 ---
@@ -91,8 +92,9 @@ ros2 launch apex_bringup sim.launch.py rviz:=true
 
 Expected, within about 30 s:
 
-* Gazebo opens with the lab: grey walls, the dark FlexBase block in the middle, the conveyor,
-  transfer station and orange chute on its east end, two brown station tables.
+* Gazebo opens with the lab: grey walls, the dark FlexBase block in the middle, the orange
+  chute and funnel on its east end with the grey chute support, the red return bin, two brown
+  station tables.
 * The TurtleBot 4 sits on its dock at the `dock` pose (east wall, lower right in the figure).
 * RViz shows the generated map (`maps/apex_lab.yaml`) with the laser scan lining up with the
   walls. If the scan is offset, use **2D Pose Estimate** in RViz at the dock.
@@ -110,7 +112,7 @@ ros2 launch apex_bringup demo.launch.py scenario:=full
 # (b) north corridor blocked -> reroute the other way round the FlexBase
 ros2 launch apex_bringup demo.launch.py scenario:=reroute      # loads apex_lab_blocked_north
 
-# (c) damaged-part return trip
+# (c) damaged-part return trip (simulated tray tilts the parts into the return bin)
 ros2 launch apex_bringup demo.launch.py scenario:=return
 ```
 
@@ -187,7 +189,7 @@ apex_cell_sim ◄─TCP─ apex_plc_bridge ◄─WriteTag/tags─ apex_orchestra
                                                    demo_client / station GUI
 ```
 
-* **One geometry file.** Walls, FlexBase, conveyor, chute, tables, poses and loop corners all
+* **One geometry file.** Walls, FlexBase, chute, funnel, return bin, tables, poses and loop corners all
   come from `lab.yaml`. Change it, run `generate_lab.py`, rebuild: world, map, routes and the
   figure in `LAB_LAYOUT.md` all follow.
 * **Same tags as hardware.** `apex_cell_sim` uses the tag names in `plc_tags.yaml`, the same

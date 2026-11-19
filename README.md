@@ -4,12 +4,16 @@
 
 APEx is an automated parts-delivery system for a small lab. A user orders
 parts at the main station; a KUKA arm in a FlexBase cell picks each part and
-puts it on a conveyor; a transfer station drops it into the bin of a
-TurtleBot 4; the TurtleBot drives around a loop corridor to the requesting
-workstation; the worker confirms every line as **OK**, **damaged** or
-**missing**; and inventory, quarantine and discrepancies are updated at every
-step. (Returning damaged parts to the FlexBase is **deferred** to a later
-stage; the software already keeps a simple operator-emptied return trip.)
+drops it into a **gravity chute**; a **funnel** at the chute exit puts it
+straight onto the tray of a TurtleBot 4 parked outside the guarding; the
+TurtleBot drives around a loop corridor to the requesting workstation; the
+worker confirms every line as **OK**, **damaged** or **missing**; damaged
+parts ride back on the tray to a **return bin next to the FlexBase**, where a
+motor **tilts the tray into a ramp** and they slide off; and inventory,
+quarantine and discrepancies are updated at every step
+([`docs/TRANSFER_AND_RETURN.md`](docs/TRANSFER_AND_RETURN.md)).
+
+**What is left for the TurtleBot:** [`docs/TURTLEBOT_STATUS.md`](docs/TURTLEBOT_STATUS.md).
 
 > **Status: Station HMI Upgrade stage built, awaiting checkpoint review.**
 > The station HMI is in [`station/`](station/README.md) - it runs on any computer with a
@@ -23,8 +27,9 @@ stage; the software already keeps a simple operator-emptied return trip.)
 
 ![Station HMI dashboard](docs/img/station_1_dashboard.png)
 
-**Team decisions so far:** gravity chute from the FlexBase onto the TurtleBot ·
-Ignition is the FlexBase HMI · damaged-part handling deferred · RL navigation
+**Team decisions so far:** KUKA drops parts into a gravity chute + funnel onto the
+TurtleBot (no conveyor) · damaged parts return on a motorised tilting tray into a
+bin by the FlexBase · Ignition is the FlexBase HMI · RL navigation
 policy approved · the lab is modelled in Gazebo for the TurtleBot · no work over
 spring break. Full list: [`docs/OPEN_QUESTIONS.md`](docs/OPEN_QUESTIONS.md#answered).
 
@@ -60,29 +65,28 @@ sequenceDiagram
     participant S as Station PC<br/>(StationCore + orchestrator)
     participant P as GuardLogix PLC
     participant K as KR C4 + KR 6 arm
-    participant X as Conveyor + transfer station
+    participant X as Gravity chute + funnel
     participant T as TurtleBot 4
     U->>S: order (multi-part)
     S->>S: check + reserve stock, create job
     S->>P: Job_Request (part list)
     P-->>S: Job_Ack
     S->>T: undock, drive to transfer pose (outside the guarding)
-    T-->>S: parked under the chute
+    T-->>S: tray parked under the funnel
     S->>P: AGV_AtTransfer
     P-->>S: AGV_InPosition_Confirmed + Cell_ReadyForAGV
     S->>P: Load_Request
     loop each part
         P->>K: select + start KRL pick program (AUT EXT)
-        K->>X: place part on the Quickdraw conveyor
-        P->>X: index conveyor, open the stop station
-        X-->>P: part slides down the gravity chute, photoeye counts it into the bin
+        K->>X: drop the part into the chute inlet (inside the guarding)
+        X-->>P: part slides down, the funnel puts it on the tray, photoeye counts it
     end
     P-->>S: Load_Complete (Chute_PartCount)
     S->>T: drive to station A or B (shorter clear direction, reroute if blocked)
     U->>S: receipt: OK / damaged / missing per line
-    alt damaged parts returned (return mechanism deferred)
-        S->>T: drive to the return-unload pose
-        U->>S: operator empties return bin, confirms count
+    alt damaged parts on the tray
+        S->>T: drive beside the return bin by the FlexBase
+        S->>T: tilt the tray (robot still) - parts slide into the bin, tray back flat
     end
     S->>S: book inventory (damaged → quarantine, missing → discrepancy)
     S->>T: next job, or dock if the queue is empty / battery low
@@ -96,13 +100,13 @@ The full state machine, with a timeout and a fault for every step, is in
 | Component | Runs on | Role |
 |---|---|---|
 | **Station GUI** (PySide6) + **StationCore** (SQLite) + **REST API** | Station PC | Inventory, multi-part orders, receiving, quarantine, job queue, robot status and a compact read-only cell summary; REST for the workstation laptop. Adapted from the old design. |
-| **Ignition HMI** | Ignition gateway (lab network) | Operator HMI for the **FlexBase cell**: cell mode, conveyor, chute count, KUKA status, alarms, read-only safety status. Same handshake tags as the station software. |
+| **Ignition HMI** | Ignition gateway (lab network) | Operator HMI for the **FlexBase cell**: cell mode, chute count, KUKA status, alarms, read-only safety status. Same handshake tags as the station software. |
 | **`apex_orchestrator`** (ROS 2) | Station PC | Turns orders into jobs, runs the job state machine, loop routing, timeouts and faults. Talks to Nav2 on the robot and to the PLC bridge. |
 | **`apex_plc_bridge`** (ROS 2, `pycomm3`) | Station PC | EtherNet/IP tag reads and **allow-listed non-safety writes** to the GuardLogix. Never touches safety tags. |
-| **Compact GuardLogix 5380** | FlexBase | Owns the cell: conveyor, transfer station, KUKA program selection (AUT EXT over EtherNet/IP I/O), and in its **safety task** the PLd circuit and the KUKA safety interface (CIP Safety or X11). |
+| **Compact GuardLogix 5380** | FlexBase | Owns the cell: part count, robot-in-position check, KUKA program selection (AUT EXT over EtherNet/IP I/O), and in its **safety task** the PLd circuit and the KUKA safety interface (CIP Safety or X11). |
 | **KR C4 compact + KR 6 R900-2** | FlexBase | Runs KRL pick programs started by the PLC. **Our Python code never commands the arm.** |
-| **TurtleBot 4** | Mobile | Nav2 on a map of the lab (first generated from the Gazebo model, later a SLAM map), named poses from YAML, docking, battery reporting. An RL navigation policy is planned (Learning-Based Navigation stage). |
-| **`apex_cell_sim`** | Station PC (simulation) | Imitates the PLC + KUKA + conveyor + transfer handshake with the **same tag names and timing**, so moving to hardware is a config change. |
+| **TurtleBot 4** | Mobile | Nav2 on a map of the lab (first generated from the Gazebo model, later a SLAM map), named poses from YAML, docking, battery reporting. Carries the tray with the **tilt motor** (`apex_tilt` node on the robot). An RL navigation policy is planned (Learning-Based Navigation stage). |
+| **`apex_cell_sim`** | Station PC (simulation) | Imitates the PLC + KUKA + chute handshake with the **same tag names and timing**, so moving to hardware is a config change. |
 
 Diagram and details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -114,7 +118,8 @@ Diagram and details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 | **KR C4 compact** | Operating modes T1 (≤ 250 mm/s), T2, AUT, **AUT EXT** (PLC control). Safety via **X11** (discrete, dual-channel) **or** **X66** Ethernet safety (CIP Safety / PROFIsafe), never both. X66 = KLI to the plant network; X69 = KSI for the WorkVisual laptop. | KUKA KR C4 compact specification V10 |
 | **Automation NTH FlexBase, 6 ft** | 72" × 40" (1.83 × 1.02 m), max height 7'6". Compact GuardLogix 5380, 1734 POINT I/O, PLd safety circuit, managed Ethernet switch, IFM IO-Link master, SMC EtherNet/IP valve bank, 3-segment stack light, optional Quickdraw conveyor with stop stations | FlexBase brochure |
 | **TurtleBot 4 (standard)** | Create® 3 base, Raspberry Pi 4B, RPLIDAR A1M8, OAK-D Pro, display. 342 × 339 × 351 mm, 3.9 kg, **max payload 9 kg**, 0.31 m/s (safe mode), 2.5–4 h runtime. Top plate 270 × 250 mm acrylic, 4 × M4 | TurtleBot 4 user manual, hardware repo |
-| **Transfer station** (to design) | **Gravity chute (transfer mode B, chosen):** stop station at the end of the conveyor, padded chute down into the TurtleBot's bin outside the guarding. Part-present photoeye counts every part. `transfer_mode` A (pusher) and C (tilt tray) stay configurable. | Project brief, team decision |
+| **Gravity chute + funnel** (to build) | **Transfer mode D (chosen 2026-11-19):** the KUKA drops each part into the chute inlet inside the guarding; the chute leaves through the east guard panel; a funnel puts the part on the robot's tray; a photoeye at the funnel outlet counts it. No conveyor. | Team decision, [`TRANSFER_AND_RETURN.md`](docs/TRANSFER_AND_RETURN.md) |
+| **Tilting return tray** (to build) | Tray on the TurtleBot, motor + two limit switches + microcontroller; tilts ≈ 35° beside the return bin so damaged parts slide off. Robot never drives unless the tray is flat. | Team decision, [`TRANSFER_AND_RETURN.md`](docs/TRANSFER_AND_RETURN.md) |
 
 Manuals are kept locally (copyright); see [`docs/manuals/README.md`](docs/manuals/README.md).
 
@@ -135,8 +140,8 @@ These rules are **non-negotiable** and apply to every stage:
 
 The FlexBase sits in the middle of the lab, surrounded by a 5 ft loop
 corridor. Two delivery stations face each other on opposite sides; the
-transfer station, the return-unload pose and the charging dock are at the
-conveyor end. Every number comes from one file,
+chute + funnel (transfer pose), the return bin (return pose) and the charging
+dock are at the east end. Every number comes from one file,
 [`ros2_ws/src/apex_bringup/config/lab.yaml`](ros2_ws/src/apex_bringup/config/lab.yaml),
 which also generates the Gazebo worlds, the Nav2 map and this figure.
 Everything here is a **proposal** to confirm against the real room:
@@ -236,11 +241,13 @@ python3 tools/draw_lab_layout.py    # needs matplotlib; regenerates docs/img/lab
 |---|---|
 | [ROADMAP](docs/ROADMAP.md) | The stages, what each delivers, the calendar, the Learning-Based Navigation plan |
 | [SIMULATION](docs/SIMULATION.md) | Running the tests, headless demos and Gazebo + Nav2 demos; how the simulation is built; what still needs testing |
+| [TURTLEBOT_STATUS](docs/TURTLEBOT_STATUS.md) | **What is done and what still needs to be done for the TurtleBot**, in order |
+| [TRANSFER_AND_RETURN](docs/TRANSFER_AND_RETURN.md) | KUKA → gravity chute → funnel → tray, and the tilting return tray: sequence, dimensions, hardware, software, safety |
 | [TURTLEBOT_NETWORK](docs/TURTLEBOT_NETWORK.md) | **Connecting to the real TurtleBot:** quick start, addresses, laptop setup, the station GUI's Sensors page, time sync chain, every change made on the robot, troubleshooting |
 | [ros2_ws README](ros2_ws/README.md) | The ROS 2 packages, each with its own detailed README |
 | [station README](station/README.md) | The station HMI: pages, order flow and inventory booking, safety notes, REST API, configuration |
 | [AUDIT](docs/AUDIT.md) | Every old module classified Keep / Adapt / Retire, with reasons |
-| [ARCHITECTURE](docs/ARCHITECTURE.md) | Block diagram; GUI, orchestrator, PLC bridge, KUKA path (AUT EXT, CIP Safety vs X11, SPOC), TurtleBot, transfer station; ROS packages; data ownership; network; safety rules |
+| [ARCHITECTURE](docs/ARCHITECTURE.md) | Block diagram; GUI, orchestrator, PLC bridge, KUKA path (AUT EXT, CIP Safety vs X11, SPOC), TurtleBot, chute + tilting tray; ROS packages; data ownership; network; safety rules |
 | [JOB_STATE_MACHINE](docs/JOB_STATE_MACHINE.md) | Pickup → delivery → return → finish; timeout and fault for every step; loop routing; inventory booking |
 | [LAB_LAYOUT](docs/LAB_LAYOUT.md) | Map frame, FlexBase footprint, corridors, named poses, routing waypoints, obstacle demo positions, the Gazebo model of the lab |
 | [OPEN_QUESTIONS](docs/OPEN_QUESTIONS.md) | What we still need from the team, with current assumptions |
@@ -252,7 +259,7 @@ Current working assumptions, each listed in
 [`docs/OPEN_QUESTIONS.md`](docs/OPEN_QUESTIONS.md) for confirmation:
 - ROS 2 **Jazzy** on the TurtleBot.
 - **Ubuntu 24.04** station PC, with a Windows laptop for Studio 5000 and WorkVisual.
-- Parts ride **directly on the conveyor belt** so they can run off the end into the gravity chute.
+- The tilting platform is **on the TurtleBot** (not at the bin), and one tray serves delivery and return.
 - **Ignition** gateway on the lab network, with its own request bits (one writer per bit).
 - The **RL policy** controls local driving only; routing stays rule-based.
 - **CIP Safety** to the KUKA if the option is installed, otherwise X11.
