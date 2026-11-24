@@ -28,11 +28,14 @@ def deep_merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def merged_params(base_file: str | Path, overrides_file: str | Path, out_file: str | Path | None = None) -> Path:
-    """Write base + overrides to ``out_file`` (a temp file by default) and return its path."""
-    base = yaml.safe_load(Path(base_file).read_text()) or {}
-    over = yaml.safe_load(Path(overrides_file).read_text()) or {}
-    merged = deep_merge(base, over)
+def merged_params(base_file: str | Path, overrides_file: str | Path | list[str | Path],
+                  out_file: str | Path | None = None) -> Path:
+    """Write base + overrides (one file or a list, applied in order) to ``out_file`` (a temp file by
+    default) and return its path."""
+    merged = yaml.safe_load(Path(base_file).read_text()) or {}
+    files = overrides_file if isinstance(overrides_file, (list, tuple)) else [overrides_file]
+    for f in files:
+        merged = deep_merge(merged, yaml.safe_load(Path(f).read_text()) or {})
     if out_file is None:
         fd = tempfile.NamedTemporaryFile("w", prefix="apex_nav2_", suffix=".yaml", delete=False)
         out_file = fd.name

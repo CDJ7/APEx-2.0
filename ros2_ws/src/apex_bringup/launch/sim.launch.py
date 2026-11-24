@@ -38,6 +38,8 @@ ARGS = [
     DeclareLaunchArgument("namespace", default_value=""),
     DeclareLaunchArgument("headless", default_value="false", choices=["true", "false"],
                           description="true = no Gazebo GUI (server only)"),
+    DeclareLaunchArgument("keepout", default_value="true", choices=["true", "false"],
+                          description="Nav2 keepout zone around the FlexBase island (maps/apex_lab_keepout.yaml)"),
 ]
 
 
@@ -87,7 +89,13 @@ def _setup(context, *args, **kwargs):
                           ("map", str(share / "maps" / "apex_lab.yaml"))],
         condition=IfCondition(LaunchConfiguration("localization")))
 
-    nav2_params = merged_params(os.path.join(tb4_nav, "config", "nav2.yaml"), share / "config" / "nav2_overrides.yaml")
+    keepout = LaunchConfiguration("keepout").perform(context) == "true"
+    overrides = [share / "config" / "nav2_overrides.yaml"] + ([share / "config" / "nav2_keepout.yaml"] if keepout else [])
+    nav2_params = merged_params(os.path.join(tb4_nav, "config", "nav2.yaml"), overrides)
+    keepout_servers = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(str(share / "launch" / "keepout.launch.py")),
+        launch_arguments=[("use_sim_time", "true"), ("mask", str(share / "maps" / "apex_lab_keepout.yaml"))],
+        condition=IfCondition(LaunchConfiguration("keepout")))
     nav2 = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(tb4_nav, "launch", "nav2.launch.py")),
         launch_arguments=[("use_sim_time", "true"), ("namespace", LaunchConfiguration("namespace")),
@@ -96,6 +104,7 @@ def _setup(context, *args, **kwargs):
 
     # localization + Nav2 after the robot exists (same idea as turtlebot4_spawn's own delays)
     return env + [gazebo, spawn, TimerAction(period=8.0, actions=[GroupAction([localization])]),
+                  TimerAction(period=10.0, actions=[GroupAction([keepout_servers])]),
                   TimerAction(period=12.0, actions=[GroupAction([nav2])])]
 
 

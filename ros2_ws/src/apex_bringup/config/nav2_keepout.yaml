@@ -1,0 +1,31 @@
+# Keepout zone (the FlexBase island) for Nav2 - merged on top of nav2.yaml + nav2_overrides.yaml
+# when a launch file runs with keepout:=true. Parameter names checked against Nav2 jazzy:
+#   nav2_costmap_2d/src/costmap_2d_ros.cpp            "filters"
+#   nav2_costmap_2d/plugins/costmap_filters/*.cpp     "enabled", "filter_info_topic", "transform_tolerance"
+# The mask (maps/apex_lab_keepout.yaml, generated from lab.yaml) and its info message are served
+# by launch/keepout.launch.py. Mask black = occupied (100) = LETHAL in the costmap; white = free.
+#
+# The keepout zone is a PLANNING AID, not a safety function (RA-11): the safety argument is the
+# FlexBase guarding. It must be in the same frame as the map Nav2 uses - the lab frame for the
+# generated map or a map aligned with align_map; for an unaligned SLAM map use the
+# <name>_keepout.yaml that align_map writes in the map's own frame.
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      filters: ["keepout_filter"]
+      keepout_filter:
+        plugin: "nav2_costmap_2d::KeepoutFilter"
+        enabled: true
+        filter_info_topic: "/costmap_filter_info"
+        transform_tolerance: 0.1
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      filters: ["keepout_filter"]
+      keepout_filter:
+        plugin: "nav2_costmap_2d::KeepoutFilter"
+        enabled: true
+        filter_info_topic: "/costmap_filter_info"
+        transform_tolerance: 0.1
