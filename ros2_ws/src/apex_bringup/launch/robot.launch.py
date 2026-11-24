@@ -7,8 +7,9 @@
     ros2 launch apex_bringup robot.launch.py map:=$HOME/apex_maps/room101_lab.yaml keepout:=true
     #    (unaligned map: map:=room101.yaml keepout:=true keepout_mask:=room101_keepout.yaml)
     #    ... cell:=sim to use the cell simulator until the PLC is connected (default),
-    #        cell:=plc for the real FlexBase PLC (network_lab.yaml address), tilt:=robot when
-    #        tilt_platform runs on the robot (default) or tilt:=none without the tray.
+    #        cell:=plc for the real FlexBase PLC (network_lab.yaml address), tilt:=none (default)
+    #        while the tilt tray is being built - damaged parts use the manual return - and
+    #        tilt:=robot once tilt_platform runs on the robot.
 
 **UNTESTED on the real robot** - written from the TurtleBot 4 Jazzy launch files; see
 docs/TURTLEBOT_STATUS.md for the bring-up checklist. Uses ``use_sim_time:=false``, the
@@ -66,7 +67,9 @@ def generate_launch_description() -> LaunchDescription:
                               description="map yaml - use the SLAM map of the real lab"),
         DeclareLaunchArgument("cell", default_value="sim", choices=["sim", "plc"],
                               description="sim = apex_cell_sim until the PLC is connected; plc = real FlexBase"),
-        DeclareLaunchArgument("tilt", default_value="robot", choices=["sim", "robot", "none"]),
+        DeclareLaunchArgument("tilt", default_value="none", choices=["sim", "robot", "none"],
+                              description="none = no tilt tray yet (manual damaged-part return) | robot = "
+                                          "tilt_platform runs on the TurtleBot | sim = simulated tray on this PC"),
         DeclareLaunchArgument("keepout", default_value="false", choices=["true", "false"],
                               description="Nav2 keepout zone - only with a map aligned to lab.yaml (align_map), "
                                           "or with keepout_mask:= the <map>_keepout.yaml align_map wrote"),

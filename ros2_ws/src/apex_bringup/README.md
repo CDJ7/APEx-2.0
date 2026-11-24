@@ -70,7 +70,7 @@ Every world is named `apex_lab` inside the SDF (the ROS-Gazebo bridge topics use
 | `sim.launch.py world:=<world> [rviz:=true] [headless:=true] [keepout:=true]` | Gazebo Harmonic with our world, TurtleBot 4 spawned **docked** at the `dock` pose, AMCL on `maps/apex_lab.yaml`, Nav2 with merged params |
 | `apex.launch.py [network:=school\|lab] [nav_backend:=nav2\|kinematic] [cell_sim:=true\|false] [tilt:=sim\|robot\|none]` | apex_cell_sim (sim backend), apex_plc_bridge, apex_orchestrator, and a simulated `tilt_platform` (tilt:=sim) |
 | `demo.launch.py scenario:=full\|reroute\|return [gazebo:=false]` | sim + apex stack + the demo client that plays the station worker; `reroute` picks the blocked-north world automatically |
-| `robot.launch.py map:=<map> [keepout:=true] [keepout_mask:=...] [cell:=sim\|plc] [tilt:=robot\|sim\|none]` | **Real TurtleBot** on the lab router: localization + Nav2 on the laptop + APEx stack (network lab). Keepout off by default - turn it on with a map aligned to lab.yaml. Untested on the robot |
+| `robot.launch.py map:=<map> [keepout:=true] [keepout_mask:=...] [cell:=sim\|plc] [tilt:=none\|robot\|sim]` | **Real TurtleBot** on the lab router: localization + Nav2 on the laptop + APEx stack (network lab). Keepout off by default - turn it on with a map aligned to lab.yaml. `tilt:=none` by default (tray not built yet; manual damaged-part return) - set `tilt:=robot` once `tilt_platform` runs on the robot. Untested on the robot |
 | `keepout.launch.py [mask:=...]` | Keepout mask server + filter-info server for Nav2's `KeepoutFilter` (included by sim/robot launches with `keepout:=true`) |
 
 `sim.launch.py` starts Gazebo itself instead of `turtlebot4_gz.launch.py` because that file

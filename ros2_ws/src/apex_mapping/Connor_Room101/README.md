@@ -57,7 +57,7 @@ cp $HOME/APEx-2.0/ros2_ws/src/apex_bringup/config/align_pairs_example.yaml $D/ro
 ros2 run apex_bringup align_map --map $D/room101.yaml --pairs $D/room101_pairs.yaml
 #   check room101_alignment.png, then commit room101_lab.*, room101_keepout.*, room101_pairs.yaml,
 #   room101_alignment.yaml/.png
-ros2 launch apex_bringup robot.launch.py map:=$D/room101_lab.yaml keepout:=true tilt:=none
+ros2 launch apex_bringup robot.launch.py map:=$D/room101_lab.yaml keepout:=true
 ```
 
-The robot must start on its dock. `tilt:=none` until the tilt tray is built.
+The robot must start on its dock. The tilt tray is off by default (`tilt:=none`); add `tilt:=robot` once it is built and `tilt_platform` runs on the robot.

@@ -142,7 +142,7 @@ nest. That means more parts and more mass, but good and damaged parts never shar
 | Orchestrator | `apex_orchestrator/job_machine.py` | new step `RETURN_DUMP`; **interlock: the robot never undocks or drives unless the tray reports FLAT** (fault `TRAY_NOT_FLAT`); faults `TILT_REFUSED`, `TILT_FAILED`, `TILT_TIMEOUT`; operator action `tray_home`; any fault during a dump also stops the tray motor |
 | Config | `job_timeouts.yaml` | `return_mode: tilt` (or `manual` for the old operator-empties-the-bin step), `tilt_dump: 30`, `tilt_start: 5` |
 | Station HMI | Robot & Cell page | tray state chip, **Tray flat (home)** button, *Action required* row for tray faults, simulation fault `tray_jam`; return booked into quarantine automatically |
-| Launch | `apex.launch.py tilt:=sim\|robot\|none` | `sim` starts a simulated tray on the PC; `robot` expects `tilt_platform` on the TurtleBot (`--ros-args -p backend:=serial`) |
+| Launch | `apex.launch.py tilt:=sim\|robot\|none` | `sim` starts a simulated tray on the PC; `robot` expects `tilt_platform` on the TurtleBot (`--ros-args -p backend:=serial`); `robot.launch.py` defaults to `tilt:=none` (manual return) until the tray is built |
 
 Fault recovery: **clear the tray by hand with the motor stopped**, press *Tray flat* (robot must
 be parked), then *Reset*, then *Resume*. The orchestrator drives back to the return pose and
