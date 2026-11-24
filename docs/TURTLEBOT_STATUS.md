@@ -49,8 +49,8 @@ Ordered roughly by when the work can start. Each row says what blocks it and whe
 |---|---|---|---|
 | M1 | Measure the room, FlexBase position, chute/funnel position, return bin, stations, dock outlet; update `lab.yaml` | `generate_lab.py` + `draw_lab_layout.py` re-run, tests pass | Q-L1…Q-L5; the room must fit 5.63 × 4.66 m or the corridors shrink |
 | M2 | Record a SLAM map: station GUI **Drive & Map** page (Start mapping, drive with W A S D, Save map), or by hand: `ros2 launch turtlebot4_navigation slam.launch.py`, teleop, `map_saver_cli` | map saved (git-ignored or in `apex_bringup/maps/`) | needs the robot clock synced (Sensors page *Clock offset*) |
-| M3 | Align the SLAM map to the `lab.yaml` frame (origin at the FlexBase centre), or re-measure the poses in the map frame | the generated map and the SLAM map overlap | the generated map is the check that `lab.yaml` is right |
-| M4 | Mark the island as keepout in Nav2 (costmap filter with `maps/apex_lab_keepout.yaml`) | Nav2 never plans through the island | the mask is generated but **not wired into the launch files yet**; it is only guidance, not a safety function (RA-11) |
+| M3 | Align the SLAM map to the `lab.yaml` frame: `ros2 run apex_bringup align_map --map <map>.yaml --pairs pairs.yaml` (3-5 spots known in both frames) | `<map>_alignment.png` shows lab.yaml on top of the real walls; pair errors < 5 cm | **tool built and tested (synthetic maps)** - how-to in `apex_bringup/README.md`; needs the real map + pairs |
+| M4 | Keepout zone around the island in Nav2 | Nav2 never plans through the island | **wired**: `keepout.launch.py` + `nav2_keepout.yaml`; on in `sim.launch.py`, `keepout:=true` in `robot.launch.py` with the aligned map. Untested with real Nav2. Planning aid only, not a safety function (RA-11) |
 
 ### 2.3 Navigate the real robot
 

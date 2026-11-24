@@ -25,5 +25,6 @@ setup(
     description="APEx 2.0 lab model, generated Gazebo worlds and Nav2 maps, configuration and launch files.",
     license="MIT",
     tests_require=["pytest"],
-    entry_points={"console_scripts": ["generate_lab = apex_bringup.generate_lab:main"]},
+    entry_points={"console_scripts": ["generate_lab = apex_bringup.generate_lab:main",
+                                      "align_map = apex_bringup.align_map:main"]},
 )

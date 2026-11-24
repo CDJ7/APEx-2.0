@@ -1,0 +1,18 @@
+# Point pairs for align_map: the same physical spot in the lab frame (lab.yaml) and in the SLAM map.
+# Copy next to your map, replace the map: numbers with what you measured, keep >= 3 pairs spread
+# out over the room (far apart = better rotation). Then:
+#   ros2 run apex_bringup align_map --map ~/apex_maps/room101.yaml --pairs pairs.yaml
+#
+# How to get the map: numbers (laptop running SLAM or localization on the saved map):
+#   * robot standing on a pose (e.g. on its dock):  ros2 topic echo /pose --once   (slam_toolbox)
+#                                                    ros2 topic echo /amcl_pose --once (localization)
+#   * a corner you can see in the map: RViz "Publish Point" tool, click it, then read
+#                                                    ros2 topic echo /clicked_point --once
+#
+# lab: is a name (any pose in lab.yaml, flexbase_ne/nw/sw/se, corner_NE/NW/SW/SE, return_bin_*,
+# chute_support_*) or [x, y] in metres measured from the FlexBase centre (+x towards the chute).
+pairs:
+  - {lab: dock,        map: [0.00, 0.00]}    # robot sitting on its dock (mapping usually starts here)
+  - {lab: flexbase_nw, map: [0.00, 0.00]}    # FlexBase corner clicked in RViz
+  - {lab: flexbase_se, map: [0.00, 0.00]}    # opposite corner
+  - {lab: station_b,   map: [0.00, 0.00]}    # robot parked on the taped station B mark

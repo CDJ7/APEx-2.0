@@ -67,10 +67,11 @@ Every world is named `apex_lab` inside the SDF (the ROS-Gazebo bridge topics use
 
 | Launch | What it starts |
 |---|---|
-| `sim.launch.py world:=<world> [rviz:=true] [headless:=true]` | Gazebo Harmonic with our world, TurtleBot 4 spawned **docked** at the `dock` pose, AMCL on `maps/apex_lab.yaml`, Nav2 with merged params |
+| `sim.launch.py world:=<world> [rviz:=true] [headless:=true] [keepout:=true]` | Gazebo Harmonic with our world, TurtleBot 4 spawned **docked** at the `dock` pose, AMCL on `maps/apex_lab.yaml`, Nav2 with merged params |
 | `apex.launch.py [network:=school\|lab] [nav_backend:=nav2\|kinematic] [cell_sim:=true\|false] [tilt:=sim\|robot\|none]` | apex_cell_sim (sim backend), apex_plc_bridge, apex_orchestrator, and a simulated `tilt_platform` (tilt:=sim) |
 | `demo.launch.py scenario:=full\|reroute\|return [gazebo:=false]` | sim + apex stack + the demo client that plays the station worker; `reroute` picks the blocked-north world automatically |
-| `robot.launch.py map:=<real map> [cell:=sim\|plc] [tilt:=robot\|sim\|none]` | **Real TurtleBot** on the lab router: localization + Nav2 on the laptop + APEx stack (network lab). Untested - see docs/TURTLEBOT_STATUS.md |
+| `robot.launch.py map:=<map> [keepout:=true] [keepout_mask:=...] [cell:=sim\|plc] [tilt:=robot\|sim\|none]` | **Real TurtleBot** on the lab router: localization + Nav2 on the laptop + APEx stack (network lab). Keepout off by default - turn it on with a map aligned to lab.yaml. Untested on the robot |
+| `keepout.launch.py [mask:=...]` | Keepout mask server + filter-info server for Nav2's `KeepoutFilter` (included by sim/robot launches with `keepout:=true`) |
 
 `sim.launch.py` starts Gazebo itself instead of `turtlebot4_gz.launch.py` because that file
 overwrites `GZ_SIM_RESOURCE_PATH` (so it cannot find our worlds) and uses its `world`
@@ -78,3 +79,60 @@ argument as the Gazebo world *name* for the bridge. We set the same resource/GUI
 ours and include `turtlebot4_spawn.launch.py` with `world:=apex_lab`.
 
 See `docs/SIMULATION.md` for the full step-by-step setup on Ubuntu 24.04 + ROS 2 Jazzy.
+
+## Keepout zone (task M4)
+
+The FlexBase island (cell + door clearance + chute support + return bin) is a **keepout zone** for
+Nav2: `maps/apex_lab_keepout.yaml` (generated from `lab.yaml`, black = keep out) is served by
+`launch/keepout.launch.py` (`filter_mask_server` + `costmap_filter_info_server`), and
+`config/nav2_keepout.yaml` adds `nav2_costmap_2d::KeepoutFilter` to the global and local
+costmaps. On in `sim.launch.py` (default), opt-in in `robot.launch.py` (`keepout:=true`).
+Parameter names were checked against the Nav2 jazzy source. Tests check that the mask covers
+the island and that no named pose's footprint touches it.
+
+The keepout zone only guides planning. **It is not a safety function** (RA-11). The mask must be
+in the **same frame as Nav2's map**, so use it with a map aligned to `lab.yaml` (below).
+
+## Aligning a real SLAM map with lab.yaml (task M3)
+
+A SLAM map has its own origin (where mapping started). The poses, routes and keepout mask are
+in the `lab.yaml` frame (origin at the FlexBase centre). `align_map` finds the rotation + shift
+between them:
+
+1. **Collect 3-5 point pairs** - the same spot in both frames, spread over the room. Copy
+   `config/align_pairs_example.yaml` next to your map and fill in the `map:` numbers:
+   * robot on its dock (or parked on a taped pose mark): `ros2 topic echo /pose --once` while
+     SLAM runs, or `/amcl_pose` with the map loaded;
+   * corners visible in the map (FlexBase corners are the best): RViz *Publish Point*, then
+     `ros2 topic echo /clicked_point --once`.
+2. **Run** (no ROS needed for this step; `python3 ros2_ws/src/apex_bringup/apex_bringup/align_map.py` works too):
+
+   ```bash
+   ros2 run apex_bringup align_map --map ~/apex_maps/room101.yaml --pairs pairs.yaml
+   ros2 run apex_bringup align_map --map ~/apex_maps/room101.yaml --pairs pairs.yaml --refine   # + ICP
+   ```
+
+   It prints the transform and each pair's error (aim for < 5 cm; a big error on one pair is
+   usually a wrong name or a typo). `--refine` matches the map's walls against the map generated
+   from `lab.yaml` - only useful once `lab.yaml` is measured (M1).
+3. **Look at `<name>_alignment.png`**: the red `lab.yaml` outlines must sit on the black walls and
+   objects of the real map, and the blue poses where the robot should stop. If they don't, fix
+   `lab.yaml` (M1) or the pairs, and run it again.
+4. **Use the aligned map**:
+
+   ```bash
+   ros2 launch apex_bringup robot.launch.py map:=$HOME/apex_maps/room101_lab.yaml keepout:=true
+   ```
+
+   or keep the original map and use the mask it wrote in that map's frame:
+   `map:=room101.yaml keepout:=true keepout_mask:=room101_keepout.yaml`.
+   `<name>_alignment.yaml` also lists every lab pose in the original map's frame, for checking
+   in RViz.
+
+| Output | Frame | Use |
+|---|---|---|
+| `<name>_lab.yaml/.pgm` | lab | the map for Nav2 - poses, routes, keepout all line up |
+| `<name>_keepout.yaml/.pgm` | original SLAM map | keepout mask if you keep the original map |
+| `<name>_alignment.yaml` | - | transform, pair errors, refine quality, lab poses in the map frame |
+| `<name>_alignment.png` | lab | visual check |
+

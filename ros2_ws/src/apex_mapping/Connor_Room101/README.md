@@ -44,12 +44,20 @@ finish over the start point to close the loop.
 3. Check that `room101.yaml` says `image: room101.pgm`, then commit on a branch and open a pull
    request.
 
-## Use it for navigation
+## Align it with lab.yaml, then use it for navigation
+
+The poses, routes and the FlexBase keepout zone are in the `lab.yaml` frame (origin at the
+FlexBase centre). Align the map once (details:
+[`apex_bringup/README.md`](../../apex_bringup/README.md#aligning-a-real-slam-map-with-labyaml-task-m3)):
 
 ```bash
-ros2 launch apex_bringup robot.launch.py \
-  map:=$HOME/APEx-2.0/ros2_ws/src/apex_mapping/Connor_Room101/maps/room101.yaml
+D=$HOME/APEx-2.0/ros2_ws/src/apex_mapping/Connor_Room101/maps
+cp $HOME/APEx-2.0/ros2_ws/src/apex_bringup/config/align_pairs_example.yaml $D/room101_pairs.yaml
+#   fill in the map: numbers (robot on its dock: ros2 topic echo /pose --once; corners: RViz Publish Point)
+ros2 run apex_bringup align_map --map $D/room101.yaml --pairs $D/room101_pairs.yaml
+#   check room101_alignment.png, then commit room101_lab.*, room101_keepout.*, room101_pairs.yaml,
+#   room101_alignment.yaml/.png
+ros2 launch apex_bringup robot.launch.py map:=$D/room101_lab.yaml keepout:=true tilt:=none
 ```
 
-The robot must start on its dock. Aligning the map to `lab.yaml` and the keepout areas are
-tasks M3-M4 in [`docs/TURTLEBOT_STATUS.md`](../../../../docs/TURTLEBOT_STATUS.md).
+The robot must start on its dock. `tilt:=none` until the tilt tray is built.
