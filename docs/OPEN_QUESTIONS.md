@@ -104,7 +104,7 @@ moves to the *Answered* table at the bottom.
 
 | ID | Question | Working assumption |
 |---|---|---|
-| Q-R1 | What should the RL policy control: **local driving** (cmd_vel between waypoints, replacing MPPI), **route choice** (which way round the loop), or both? | Local driving only; routing stays rule-based. |
+| Q-R1 | What should the RL policy control: **local driving** (cmd_vel between waypoints, replacing MPPI), **route choice** (which way round the loop), or both? | Local driving only; routing stays rule-based. **The training environment is built on this assumption** (`RL_NAVIGATION.md`) - say so if it should change. |
 | Q-R2 | Training hardware: is there a GPU machine (station PC or personal)? | Training on a team member's GPU laptop; CPU is possible but slow. |
 | Q-R3 | Success criterion to use the policy on the real robot? | Beats Nav2 MPPI in sim on success rate with zero collisions over 200 runs. |
 

@@ -11,6 +11,7 @@ Built in the **Simulation Bring-up** stage; see `docs/SIMULATION.md` for the ful
 | [`apex_cell_sim`](src/apex_cell_sim/README.md) | ament_python | simulated cell with the real tag names and timing |
 | [`apex_orchestrator`](src/apex_orchestrator/README.md) | ament_python | job state machine, loop routing, Nav2 adapter, demos |
 | [`apex_tilt`](src/apex_tilt/README.md) | ament_python | tilting return tray on the TurtleBot: controller + interlocks, `tilt_platform` node (runs on the robot) |
+| [`apex_rl`](src/apex_rl/README.md) | ament_python | Learning-Based Navigation: 2D training environment from `lab.yaml` (Gymnasium), baseline, evaluation, PPO training |
 
 ```
 station GUI ──services──► apex_orchestrator ──NavPort──► Nav2 / TurtleBot 4 (Gazebo or real)

@@ -90,10 +90,10 @@ The earlier Gantt item "lightweight arm on the TurtleBot" is **replaced** by the
 
 | # | Task | Notes |
 |---|---|---|
-| R1 | Decide what the policy controls (local driving only?) (Q-R1) and the training machine (Q-R2) | plan in [`ROADMAP.md`](ROADMAP.md) |
-| R2 | Gymnasium environment from `lab.yaml` (fast 2D lidar sim) + Gazebo validation | same geometry as the real lab |
-| R3 | Train (PPO/SAC), evaluate against Nav2 on the demo scenarios | success rate, collisions, time, clearance |
-| R4 | Run it behind Nav2's collision monitor, switchable `controller:=mppi\|rl` | RA-16 |
+| R1 | Decide what the policy controls (Q-R1) and the training machine (Q-R2) | **working assumption: local driving only** (routing, parking, docking stay rule-based); training runs on a 4-8 core CPU, no GPU needed | `docs/RL_NAVIGATION.md` §1 |
+| R2 | Gymnasium environment from `lab.yaml` (fast 2D lidar sim) | **built**: `apex_rl` (env, baseline 96 % success with obstacles, evaluation, PPO training); Gazebo validation still to do | `docs/RL_NAVIGATION.md` |
+| R3 | Train (PPO), evaluate against the baseline, then against Nav2 MPPI in Gazebo | 3-10 M steps (~25 min per 3 M on 4 cores); success rate, collisions, keepout, time, clearance | `python3 -m apex_rl.train`, `apex_rl.evaluate` |
+| R4 | `rl_policy` ROS node behind Nav2's collision monitor, switchable `controller:=mppi\|rl` | not started; RA-16 | |
 
 ### 2.7 Documentation and safety
 

@@ -27,3 +27,7 @@ logs/
 # Station runtime data
 station/data/
 station/logs/
+
+# RL training runs (models, checkpoints, logs) - keep the good models elsewhere or in a release
+runs/
+ros2_ws/runs/

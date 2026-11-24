@@ -306,6 +306,7 @@ python3 tools/draw_lab_layout.py    # needs matplotlib; regenerates docs/img/lab
 | [ROADMAP](docs/ROADMAP.md) | The stages, what each delivers, the calendar, the Learning-Based Navigation plan |
 | [SIMULATION](docs/SIMULATION.md) | Running the tests, headless demos and Gazebo + Nav2 demos; how the simulation is built; what still needs testing |
 | [TURTLEBOT_STATUS](docs/TURTLEBOT_STATUS.md) | **What is done and what still needs to be done for the TurtleBot**, in order |
+| [RL_NAVIGATION](docs/RL_NAVIGATION.md) | Learning-Based Navigation: the training environment, baseline results, how to train and evaluate, next steps |
 | [TRANSFER_AND_RETURN](docs/TRANSFER_AND_RETURN.md) | KUKA → gravity chute → funnel → tray, and the tilting return tray: sequence, dimensions, hardware, software, safety |
 | [TURTLEBOT_NETWORK](docs/TURTLEBOT_NETWORK.md) | **Connecting to the real TurtleBot:** quick start, addresses, laptop setup, the station GUI's Sensors page, time sync chain, every change made on the robot, troubleshooting |
 | [ros2_ws README](ros2_ws/README.md) | The ROS 2 packages, each with its own detailed README |

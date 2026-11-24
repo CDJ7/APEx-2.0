@@ -1,0 +1,8 @@
+# Learning-Based Navigation (training machine). Python 3.10+.
+#   python3 -m pip install -r ros2_ws/src/apex_rl/requirements.txt
+numpy>=1.24
+PyYAML>=6.0
+matplotlib>=3.7          # episode pictures
+gymnasium>=0.29          # environment API (the env also runs without it, for tests)
+stable-baselines3>=2.3   # PPO training (pulls torch)
+# tensorboard            # optional: training curves (tensorboard --logdir runs/<run>/tb)
