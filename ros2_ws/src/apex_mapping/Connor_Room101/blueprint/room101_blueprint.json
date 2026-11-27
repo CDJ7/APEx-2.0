@@ -1,0 +1,30 @@
+{
+  "room": "101",
+  "name": "ROBOTICS",
+  "area_drawing": "1964 SF",
+  "floor_area_m2": 182.1,
+  "floor_size_m": [
+    19.62,
+    9.95
+  ],
+  "room_to_building": {
+    "theta_deg": 16.0,
+    "tx": 1.4302,
+    "ty": 13.2648,
+    "note": "building = TourBot tourbot_sim world frame (Central Lobby tag = 0,0), metres"
+  },
+  "building_to_cad": {
+    "scale_cad_per_m": 39.370079,
+    "origin_cad": [
+      16801.6,
+      1809.2
+    ],
+    "note": "cad = origin_cad + building_m / 0.0254 (drawing in inches)"
+  },
+  "tag_room_frame": [
+    10.733,
+    5.297
+  ],
+  "source": "Level 1.dxf (TourBot repository, cad/dxf)",
+  "glass_segments": 368
+}

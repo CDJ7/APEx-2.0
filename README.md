@@ -259,9 +259,12 @@ python -m apex_station.app --sensors ros
   point, so the map should be built from there.
 - **Go slowly:** 0.15-0.2 m/s and gentle turns. Fast turns smear walls. Pause for a second
   after each turn.
-- **Follow the walls first:** go once around the room, about 0.5-1 m from the walls, so the
-  lidar sees every wall at an angle.
-- **Then the middle:** drive around the FlexBase, the island and between the benches.
+- **The walls are already known** from the building's CAD drawing (Room 101 blueprint, step 5),
+  windows and glass doors included. You map **what is in the room**: one slow lap about 1 m
+  from the walls is enough for the map to line up with the blueprint - no need to trace every
+  wall, and what the lidar sees through the windows is thrown away later.
+- **Then the middle:** drive around the FlexBase, the island, the benches and tables - this is
+  what the blueprint does not know.
 - **Then the robot's own routes:** dock → transfer chute → each delivery station → return bin.
 - **Watch the map as you go.** White is free space, black is walls, grey is not seen yet. Fill
   the grey gaps you care about.
@@ -275,19 +278,29 @@ python -m apex_station.app --sensors ros
   Save again whenever the map looks better.
 - Then **Stop mapping**, and drive the robot back onto the dock.
 
-**5. Check and fix the map**
-- **Good map:** straight, single walls; rooms closed off by black lines; no ghost copies of
-  walls. If walls are doubled or the map is twisted, press **Stop mapping** and start again,
-  driving slower with more pauses.
-- **Glass walls and doors:** the lidar sees through glass. They show up as gaps with long
-  white rays going through, and Nav2 would try to drive through them. Open
-  `~/apex_maps/lab_real.pgm` in an image editor (GIMP), draw **black lines** (2 px) along the
-  glass, and save as `.pgm`.
-- **Remove junk:** paint over temporary objects (a forgotten chair) in light grey/white.
+**5. Merge it into the Room 101 blueprint (walls and glass from CAD)**
+- **Good raw map:** straight, single walls, no ghost copies. If walls are doubled or the map is
+  twisted, **Stop mapping** and start again, driving slower with more pauses.
+- Run the merge (no ROS needed; details in
+  [`ros2_ws/src/apex_mapping/Connor_Room101/README.md`](ros2_ws/src/apex_mapping/Connor_Room101/README.md)):
+
+  ```bash
+  ros2 run apex_bringup blueprint_merge --map ~/apex_maps/lab_real.yaml \
+      --blueprint ros2_ws/src/apex_mapping/Connor_Room101/blueprint/room101_blueprint.yaml
+  ```
+
+  It lines your map up with the CAD walls by itself and writes `lab_real_merged.yaml`: the
+  **walls, windows and doors from the drawing** (glass is a solid wall, doors are closed), plus
+  only what your map saw **inside** the room. Everything seen through the glass is dropped -
+  no GIMP editing needed. Check `lab_real_merge.png`: the red CAD outline must sit on your
+  map's walls. If it prints a WARNING about another rotation, pass `--guess x,y,deg`.
+- **Remove junk:** a forgotten chair can still be painted out of `lab_real_merged.pgm` in
+  white.
 
 **6. Next steps** (in [`docs/TURTLEBOT_STATUS.md`](docs/TURTLEBOT_STATUS.md), tasks M3-M4 and
-N1): align the map to the `lab.yaml` frame, mark keepout areas, then navigate with
-`ros2 launch apex_bringup robot.launch.py map:=$HOME/apex_maps/lab_real.yaml`. Maps stay in
+N1): align the merged map to the `lab.yaml` frame (`align_map --map lab_real_merged.yaml
+--pairs ...`), then navigate with
+`ros2 launch apex_bringup robot.launch.py map:=$HOME/apex_maps/lab_real_merged_lab.yaml keepout:=true`. Maps stay in
 `~/apex_maps` on the laptop. Copy the final, cleaned map into
 `ros2_ws/src/apex_bringup/maps/` to share it through the repo.
 

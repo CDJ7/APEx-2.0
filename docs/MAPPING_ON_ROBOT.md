@@ -76,7 +76,13 @@ cp ~/apex_maps/runs/lab/<date_time>/map.pgm ~/apex_maps/lab_real.pgm
 sed 's/^image: .*/image: lab_real.pgm/' ~/apex_maps/runs/lab/<date_time>/map.yaml > ~/apex_maps/lab_real.yaml
 ```
 
-Then draw the glass walls into `lab_real.pgm`, as in the README.
+Then merge it into the Room 101 CAD blueprint (walls, windows and doors come from the drawing;
+no glass needs drawing by hand), as in the README's step 5:
+
+```bash
+ros2 run apex_bringup blueprint_merge --map ~/apex_maps/lab_real.yaml \
+    --blueprint ros2_ws/src/apex_mapping/Connor_Room101/blueprint/room101_blueprint.yaml
+```
 
 ## If the connection drops
 
