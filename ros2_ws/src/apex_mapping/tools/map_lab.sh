@@ -13,7 +13,8 @@
 # 2. SSHes to the robot and runs scripts/teleop_map.sh there inside tmux, so a Wi-Fi drop
 #    doesn't end the run (run this again to reattach)
 # 3. after you stop it (OPTIONS on the controller, or Ctrl-C), copies the run to
-#    ~/apex_maps/runs/<name>/<date_time>/ and opens the map in RViz
+#    ~/apex_maps/runs/<name>/<date_time>/, rebuilds the map on the laptop from the raw bag
+#    (rebuild_map.sh: every scan, so no smearing) and opens it in RViz
 #
 # Drive with the TurtleBot 4 controller, or pass --no-controller and drive from the station
 # GUI's Drive & Map tab (W A S D) - but don't press "Start mapping" there: SLAM runs on the robot.
@@ -22,6 +23,7 @@
 #   APEX_ROBOT       SSH target            (default ubuntu@192.168.0.3, the robot on the lab router)
 #   APEX_MAPS_DIR    where runs are copied (default ~/apex_maps/runs)
 #   APEX_NO_RVIZ=1   copy only, don't open RViz
+#   APEX_NO_REBUILD=1 keep the robot's map; skip rebuilding it on the laptop (rebuild_map.sh)
 
 ROBOT="${APEX_ROBOT:-ubuntu@192.168.0.3}"
 HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -112,21 +114,29 @@ fi
 echo "[OK]   Copied ($(du -sh "$dest" | cut -f1))"
 sed 's/^/       /' "$dest/run.yaml" 2>/dev/null
 
-if [ ! -f "$dest/map.yaml" ]; then
-  echo "No SLAM map in this run (only the raw bag), so there is nothing to open in RViz."
+# APEx: build the final map again on the laptop from the raw bag. SLAM on the Pi drops scans
+# when the CPU is busy, which smears walls and makes the end-of-run loop closure jump.
+echo
+if [ -z "${APEX_NO_REBUILD:-}" ] && "$HERE/rebuild_map.sh" "$dest"; then
+  map=rebuilt
+elif [ -f "$dest/map.yaml" ]; then
+  echo "Using the robot's own map (map.pgm). Rebuild later with: $HERE/rebuild_map.sh $dest"
+  map=map
+else
+  echo "No SLAM map in this run. Build one from the bag with: $HERE/rebuild_map.sh $dest"
   exit 0
 fi
 echo
 echo "To use this map for navigation (robot.launch.py expects ~/apex_maps/lab_real.yaml):"
-echo "  cp $dest/map.pgm ~/apex_maps/lab_real.pgm"
-echo "  sed 's/^image: .*/image: lab_real.pgm/' $dest/map.yaml > ~/apex_maps/lab_real.yaml"
+echo "  cp $dest/$map.pgm ~/apex_maps/lab_real.pgm"
+echo "  sed 's/^image: .*/image: lab_real.pgm/' $dest/$map.yaml > ~/apex_maps/lab_real.yaml"
 [ -n "${APEX_NO_RVIZ:-}" ] && exit 0
 
 # Show the map in RViz on a laptop-only ROS domain, so nothing reaches the robot.
 echo "Opening the map in RViz. Close the RViz window when you're done."
 source /opt/ros/jazzy/setup.bash
 export ROS_DOMAIN_ID=73 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
-ros2 run nav2_map_server map_server --ros-args -p yaml_filename:="$dest/map.yaml" \
+ros2 run nav2_map_server map_server --ros-args -p yaml_filename:="$dest/$map.yaml" \
   > /dev/null 2>&1 &
 map_server=$!
 trap 'kill $map_server 2>/dev/null' EXIT
