@@ -26,5 +26,7 @@ setup(
     license="MIT",
     tests_require=["pytest"],
     entry_points={"console_scripts": ["generate_lab = apex_bringup.generate_lab:main",
-                                      "align_map = apex_bringup.align_map:main"]},
+                                      "align_map = apex_bringup.align_map:main",
+                                      "cad_blueprint = apex_bringup.blueprint:main_blueprint",
+                                      "blueprint_merge = apex_bringup.blueprint:main_merge"]},
 )

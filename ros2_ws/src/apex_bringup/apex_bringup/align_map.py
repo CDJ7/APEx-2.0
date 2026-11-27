@@ -157,11 +157,16 @@ def read_pgm(path: str | Path) -> np.ndarray:
             j += 1
         tokens.append(raw[i:j])
         i = j
-    if tokens[0] != b"P5":
-        raise ValueError(f"{path}: only binary PGM (P5) is supported")
+    if tokens[0] not in (b"P5", b"P2"):
+        raise ValueError(f"{path}: only PGM (P5 binary or P2 ASCII) is supported")
     w, h, maxval = int(tokens[1]), int(tokens[2]), int(tokens[3])
     if maxval > 255:
         raise ValueError(f"{path}: 16-bit PGM not supported")
+    if tokens[0] == b"P2":                     # ASCII: whitespace-separated numbers (comments allowed)
+        body = b"\n".join(line.split(b"#", 1)[0] for line in raw[i:].splitlines())
+        data = np.array(body.split(), dtype=np.int64)[:w * h]
+        data = np.round(data * (255.0 / maxval)).astype(np.uint8) if maxval != 255 else data.astype(np.uint8)
+        return data.reshape(h, w)
     data = np.frombuffer(raw[i + 1:i + 1 + w * h], dtype=np.uint8)
     return data.reshape(h, w).copy()
 

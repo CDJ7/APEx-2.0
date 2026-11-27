@@ -6,3 +6,5 @@
 PyYAML>=6.0          # configs (also python3-yaml from apt)
 pycomm3>=1.2         # EtherNet/IP to the Compact GuardLogix 5380 (lab profile only)
 pytest>=7.0          # tests (also python3-pytest from apt)
+ezdxf>=1.1            # optional: cad_blueprint (room blueprint from the building's DXF floor plan)
+numpy>=1.24          # align_map, blueprint tools, apex_rl

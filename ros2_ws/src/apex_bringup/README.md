@@ -136,3 +136,19 @@ between them:
 | `<name>_alignment.yaml` | - | transform, pair errors, refine quality, lab poses in the map frame |
 | `<name>_alignment.png` | lab | visual check |
 
+## Room blueprint from CAD, and merging a SLAM map into it
+
+`apex_bringup/blueprint.py` (no ROS; `pip install ezdxf` for the first tool only):
+
+| Command | What |
+|---|---|
+| `cad_blueprint --dxf ~/tourbot/cad/dxf/"Level 1.dxf" --room 101 --out-dir <dir>` | cuts one room out of the building's floor plan (TourBot repository): walls, **glass** and doors (drawn closed) as a solid outline, floor free, outside unknown, in a room frame lined up with the walls; plus the transforms to TourBot's building frame and to the CAD drawing |
+| `blueprint_merge --map <slam>.yaml --blueprint <room>_blueprint.yaml` | aligns a SLAM map to the blueprint by itself (rotation search + ICP on the walls; or `--guess` / `--pairs`), keeps the CAD walls and only what SLAM saw **inside** the room (> 15 cm from the walls) - window see-through is dropped - and also writes the map in TourBot's building frame |
+
+Room 101's blueprint is committed in
+[`apex_mapping/Connor_Room101/blueprint/`](../apex_mapping/Connor_Room101/blueprint/); the full
+workflow is in [`apex_mapping/Connor_Room101/README.md`](../apex_mapping/Connor_Room101/README.md).
+Tests: `ros2_ws/tests/test_blueprint.py` (a synthetic DXF: room found, glass solid, an open door
+drawn shut, the neighbour room excluded; merge recovers a known transform, keeps objects inside,
+drops window junk; a symmetric room triggers the warning).
+
