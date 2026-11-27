@@ -14,6 +14,9 @@ Adapted from the TourBot project's teleop mapping (`aidanjmartin/tourbot`,
 - The laptop cabled to the lab router and the robot on its Wi-Fi (`ssh ubuntu@192.168.0.3`
   logs in without a password, see [`TURTLEBOT_NETWORK.md`](TURTLEBOT_NETWORK.md)).
 - The robot charged. About 30 minutes of mapping uses roughly a quarter of the battery.
+- The dock power saver **off** for the session (`ssh -t ubuntu@192.168.0.3 'sudo ~/power-saver-off.sh'`;
+  `map_lab.sh` warns if it is on). With it on, docking and undocking restart the lidar and camera,
+  which can crash the lidar driver and hang the camera.
 - **One of:**
   - the TurtleBot 4 controller, charged and paired with the robot, or
   - the station GUI's **Drive & Map** tab to drive (run with `--no-controller`).
@@ -23,7 +26,8 @@ Adapted from the TourBot project's teleop mapping (`aidanjmartin/tourbot`,
 
 ## Map the lab
 
-1. Put the robot next to its dock: the map's origin is wherever the robot starts.
+1. Put the robot **on its dock**: the run records the dock's pose, which lines the map up with
+   the room's CAD walls (Room 101).
 2. On the laptop, from the repository folder, run one of:
 
    ```bash
@@ -48,8 +52,10 @@ Adapted from the TourBot project's teleop mapping (`aidanjmartin/tourbot`,
 5. To finish, hold **OPTIONS** on the controller for 2 seconds, or press **Ctrl-C** in the
    terminal. The light ring flashes green and the robot's screen shows "Map saved".
 6. The laptop copies the run, **builds the map again from the raw bag** (`rebuilt.pgm`, about
-   half the run's length), prints how to make it the navigation map (`lab_real`), and opens
-   it in RViz. Close RViz when you're done.
+   half the run's length), and, if the run is named after a room with a CAD blueprint
+   (`room101`), **merges it into the blueprint** anchored on the dock (`room101_merged.*`: CAD
+   walls + what SLAM saw inside the room). It prints how to make it the navigation map
+   (`lab_real`) and opens it in RViz. Close RViz when you're done.
 
 Press Ctrl-C a second time only if saving gets stuck.
 
@@ -68,6 +74,7 @@ Each folder contains:
 |---|---|
 | `rebuilt.pgm`, `rebuilt.yaml` | **The map to use.** Built on the laptop from the bag, using every scan |
 | `rebuilt.posegraph`, `rebuilt.data` | slam_toolbox's session for the rebuilt map |
+| `<room>_merged.*`, `<room>_building.*`, `<room>_merge.json/.png` | Runs named after a room with a CAD blueprint: the rebuilt map merged into it (see `Connor_Room101/README.md`) |
 | `map.pgm`, `map.yaml` | The robot's live map. Can be smeared: the Pi drops scans when busy |
 | `map.posegraph`, `map.data` | slam_toolbox's saved session: reload it to extend the map or to localize |
 | `bag/` | The raw recording: `/scan`, `/odom`, `/tf` (including SLAM's corrected pose), `/tf_static`, `/imu` |
@@ -104,6 +111,7 @@ Set these as environment variables before running `map_lab.sh`.
 | `APEX_MAPS_DIR` | `~/apex_maps/runs` | Where runs are copied on the laptop |
 | `APEX_NO_RVIZ` | unset | Set to `1` to copy the run without opening RViz |
 | `APEX_NO_REBUILD` | unset | Set to `1` to keep only the robot's map (no rebuild on the laptop) |
+| `APEX_NO_MERGE` | unset | Set to `1` to skip merging into the room's CAD blueprint |
 | `APEX_REBUILD_RATE` | `2` | Bag playback speed for the rebuild; use `1` if it reports dropped scans |
 
 The SLAM settings are `ros2_ws/src/apex_mapping/config/slam.yaml` (TurtleBot 4 defaults with a
@@ -120,4 +128,6 @@ wider loop-closure search). The GUI's *Start mapping* uses the same file.
 | The robot doesn't move (GUI) | *Driving enabled* ticked? The note should say *Ready*. Click inside the GUI window first. |
 | Map smeared, doubled walls, or it jumps when you get back to the start | The robot's live SLAM fell behind (`queue is full` in `slam.log`). Use `rebuilt.pgm`, which map_lab.sh makes on the laptop. For an older run: `ros2_ws/src/apex_mapping/tools/rebuild_map.sh ~/apex_maps/runs/<name>/<date_time>` |
 | GUI says `Can't drive: ROS 2 not available` | The GUI was started without ROS. Close it and start it with `source /opt/ros/jazzy/setup.bash` first (README, *Mapping the lab*, step 2). |
+| Camera won't start, or the lidar stops (`Cannot start scan` / `The lidar driver has crashed`) | The dock power saver stops the lidar and camera on the dock and starts them again on undocking; starting them twice crashes the lidar driver and hangs the OAK-D. Turn the power saver off for mapping (also restarts the robot's ROS): `ssh -t ubuntu@192.168.0.3 'sudo ~/power-saver-off.sh'`. Back on afterwards for faster charging: `sudo ~/power-saver-on.sh`. If it already crashed: `ssh -t ubuntu@192.168.0.3 'sudo systemctl restart turtlebot4'`. |
+| `Put the robot ON ITS DOCK first` | The run waits for the dock so it can record the dock's pose (it lines the map up with the CAD walls). Drive it onto the dock, or pass `--no-dock` to skip. |
 | `Can't reach the robot` | Laptop cabled to the router? Robot screen shows `192.168.0.3`? Otherwise run `APEX_ROBOT=ubuntu@<address> .../map_lab.sh`. |

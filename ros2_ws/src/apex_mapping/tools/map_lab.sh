@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Map the APEx lab with SLAM running ON THE ROBOT (survives Wi-Fi drops). Run this on the laptop.
 #
-#   ros2_ws/src/apex_mapping/tools/map_lab.sh [name] [--no-controller]
+#   ros2_ws/src/apex_mapping/tools/map_lab.sh [name] [--no-controller] [--no-dock]
 #
 # Adapted from aidanjmartin/tourbot (tourbot_navigation/tools/map_floor.sh, commit d4ba4ad),
 # borrowed with the TourBot team's knowledge. APEx changes: the run name replaces the floor
@@ -14,7 +14,8 @@
 #    doesn't end the run (run this again to reattach)
 # 3. after you stop it (OPTIONS on the controller, or Ctrl-C), copies the run to
 #    ~/apex_maps/runs/<name>/<date_time>/, rebuilds the map on the laptop from the raw bag
-#    (rebuild_map.sh: every scan, so no smearing) and opens it in RViz
+#    (rebuild_map.sh: every scan, so no smearing), merges it into the room's CAD blueprint when
+#    there is one (walls from the CAD, anchored on the dock) and opens it in RViz
 #
 # Drive with the TurtleBot 4 controller, or pass --no-controller and drive from the station
 # GUI's Drive & Map tab (W A S D) - but don't press "Start mapping" there: SLAM runs on the robot.
@@ -24,6 +25,7 @@
 #   APEX_MAPS_DIR    where runs are copied (default ~/apex_maps/runs)
 #   APEX_NO_RVIZ=1   copy only, don't open RViz
 #   APEX_NO_REBUILD=1 keep the robot's map; skip rebuilding it on the laptop (rebuild_map.sh)
+#   APEX_NO_MERGE=1  don't merge into the room's CAD blueprint (<name>_blueprint.yaml)
 
 ROBOT="${APEX_ROBOT:-ubuntu@192.168.0.3}"
 HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -39,6 +41,7 @@ extra=()
 for arg in "$@"; do
   case "$arg" in
     --no-controller) extra+=(--no-controller) ;;
+    --no-dock) extra+=(--no-dock) ;;
     -*) echo "unknown option $arg"; exit 2 ;;
     *) name="$arg" ;;
   esac
@@ -67,6 +70,24 @@ if [ -n "$missing" ]; then
   exit 1
 fi
 echo "[OK]   Robot has tmux, slam_toolbox, ros2 bag and numpy"
+
+# APEx: the dock power saver stops the lidar and camera on the dock and starts them again on
+# undocking. Starting them twice crashes the lidar driver and hangs the OAK-D camera, so map with
+# it off (the robot's ~/power-saver-off.sh turns it off and restarts the robot's ROS service).
+if rsh "grep -q 'power_saver: true' /opt/ros/jazzy/share/turtlebot4_bringup/config/turtlebot4.yaml"; then
+  echo "[WARN] The robot's dock power saver is ON: docking stops the lidar and camera, and"
+  echo "       restarting them can crash the lidar driver or hang the camera. For mapping, turn it"
+  echo "       off first (restarts the robot's ROS, ~1 min):  ssh -t $ROBOT 'sudo ~/power-saver-off.sh'"
+  echo "       (back on for faster charging afterwards:     ssh -t $ROBOT 'sudo ~/power-saver-on.sh')"
+fi
+if ! rsh tmux has-session -t "$SESSION" 2>/dev/null && \
+   ! rsh "source /etc/turtlebot4/setup.bash >/dev/null 2>&1; ros2 topic info /scan 2>/dev/null | grep -q 'Publisher count: [1-9]'"; then
+  echo "[FAIL] The lidar driver is not running on the robot (it crashes when the lidar is started"
+  echo "       twice). Restart the robot's ROS, wait about a minute, and run this again:"
+  echo "         ssh -t $ROBOT 'sudo systemctl restart turtlebot4'"
+  exit 1
+fi
+echo "[OK]   Lidar driver running (or a run is already going)"
 
 last_before="$(rsh "cat ~/apex_maps/runs/.last_run 2>/dev/null")"
 
@@ -125,6 +146,26 @@ elif [ -f "$dest/map.yaml" ]; then
 else
   echo "No SLAM map in this run. Build one from the bag with: $HERE/rebuild_map.sh $dest"
   exit 0
+fi
+
+# APEx: if the run is named after a room with a CAD blueprint (e.g. room101 ->
+# Connor_Room101/blueprint/room101_blueprint.yaml), merge it: walls, glass and doors come from the
+# CAD, SLAM only adds what is inside the room. The fit is anchored on the dock (dock_odom in
+# run.yaml + <room>_dock.yaml), so the drive only has to cover the room's contents.
+blueprint="$(ls "$PKG"/*/blueprint/"${run_name}_blueprint.yaml" 2>/dev/null | head -1)"
+if [ -n "$blueprint" ] && [ -z "${APEX_NO_MERGE:-}" ]; then
+  echo
+  echo "=== Merging into the CAD blueprint ($(basename "$blueprint")) ==="
+  bringup="$PKG/../apex_bringup"
+  if PYTHONPATH="$bringup${PYTHONPATH:+:$PYTHONPATH}" python3 "$bringup/apex_bringup/blueprint.py" \
+       --map "$dest/$map.yaml" --blueprint "$blueprint" --out-dir "$dest" --name "$run_name"; then
+    map="${run_name}_merged"
+    echo "[OK]   $dest/${run_name}_merged.yaml - check ${run_name}_merge.png (blue circle = dock)"
+    echo "       To put it in the repository:"
+    echo "         cp $dest/${run_name}_{merged,building}.{yaml,pgm} $dest/${run_name}_merge.{json,png} $(dirname "$(dirname "$blueprint")")/maps/"
+  else
+    echo "[WARN] Merge failed; using the SLAM map. Retry by hand: see Connor_Room101/README.md"
+  fi
 fi
 echo
 echo "To use this map for navigation (robot.launch.py expects ~/apex_maps/lab_real.yaml):"

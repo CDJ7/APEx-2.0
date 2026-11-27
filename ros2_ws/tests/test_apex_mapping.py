@@ -26,6 +26,10 @@ def test_scripts_compile_and_use_apex_paths():
     lab = (PKG / "tools" / "map_lab.sh").read_text()
     assert "ubuntu@192.168.0.3" in lab and "10.80.91.57" not in lab
     assert "rebuild_map.sh" in lab                     # final map is rebuilt on the laptop
+    assert "_blueprint.yaml" in lab and "blueprint.py" in lab   # merged into the room's CAD walls
+    assert "dock_odom" in src                          # the run records where the dock is
+    assert "--no-dock" in src and "check_lidar_driver" in src     # waits for the dock; spots a dead lidar driver
+    assert "power_saver: true" in lab and "--no-dock" in lab      # warns about the dock power saver
     rebuild = (PKG / "tools" / "rebuild_map.sh").read_text()
     assert "LOCALHOST" in rebuild and "online_sync_launch.py" in rebuild  # never talks to the robot
     yaml.safe_load((PKG / "tools" / "map_view.rviz").read_text())
@@ -42,6 +46,10 @@ def test_origin_is_credited():
 def test_room101_folder():
     room = PKG / "Connor_Room101"
     assert (room / "README.md").exists() and (room / "maps" / "README.md").exists()
+    dock = yaml.safe_load((room / "blueprint" / "room101_dock.yaml").read_text())["dock"]
+    bp = yaml.safe_load((room / "blueprint" / "room101_blueprint.yaml").read_text())
+    assert 15.0 < dock["x"] < 19.7 and 0.0 < dock["y"] < 4.0   # right end wall, bottom half
+    assert bp["image"] == "room101_blueprint.pgm"
     for y in (room / "maps").glob("*.yaml"):                  # any committed map must load
         m = yaml.safe_load(y.read_text())
         assert (room / "maps" / m["image"]).exists(), y

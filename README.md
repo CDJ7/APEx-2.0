@@ -273,8 +273,11 @@ python -m apex_station.app --sensors ros
   robot as a blue dot. Then tick **Driving enabled**.
 
 **3. Drive**
-- **Start next to the dock** and back off it with `S`. The dock is the robot's daily starting
-  point, so the map should be built from there.
+- **Start on the dock** and back off it with `S`. The dock is the robot's daily starting
+  point, and the merge (step 5) uses it to line the map up with the CAD walls
+  (`Connor_Room101/blueprint/room101_dock.yaml`: right end wall, about 2 m up from the
+  bottom-right corner). For the GUI method this assumes the robot booted on its dock;
+  `map_lab.sh room101` records the dock's pose itself and is the more reliable way.
 - **Go slowly:** 0.15-0.2 m/s and gentle turns. Fast turns smear walls. Pause for a second
   after each turn.
 - **The walls are already known** from the building's CAD drawing (Room 101 blueprint, step 5),
@@ -307,11 +310,13 @@ python -m apex_station.app --sensors ros
       --blueprint ros2_ws/src/apex_mapping/Connor_Room101/blueprint/room101_blueprint.yaml
   ```
 
-  It lines your map up with the CAD walls by itself and writes `lab_real_merged.yaml`: the
+  It lines your map up with the CAD walls, **anchored on the dock**, and writes `lab_real_merged.yaml`: the
   **walls, windows and doors from the drawing** (glass is a solid wall, doors are closed), plus
   only what your map saw **inside** the room. Everything seen through the glass is dropped -
   no GIMP editing needed. Check `lab_real_merge.png`: the red CAD outline must sit on your
-  map's walls. If it prints a WARNING about another rotation, pass `--guess x,y,deg`.
+  map's walls and the blue circle (the dock) on the right end wall. If it prints a WARNING,
+  check the picture; `--dock-map x,y,deg` gives the dock's pose in your map if the robot did not
+  boot on its dock.
 - **Remove junk:** a forgotten chair can still be painted out of `lab_real_merged.pgm` in
   white.
 

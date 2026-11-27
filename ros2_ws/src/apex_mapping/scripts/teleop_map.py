@@ -53,6 +53,7 @@ JOY_DEVICE = '/dev/input/js0'
 # The TurtleBot 4 controller (DualShock 4 layout) on joy_linux: 4 = L1 (drive), 5 = R1
 # (turbo), 8 = SHARE, 9 = OPTIONS
 DEFAULT_SAVE_BUTTON = 9
+ROBOT_HINT = 'ubuntu@192.168.0.3'   # for messages only
 MIN_SCAN_HZ = 5.0       # the RPLIDAR A1 runs at about 7.6 Hz
 LOW_BATTERY = 0.20
 
@@ -126,6 +127,7 @@ class TeleopMapper(Node):
         self.joy_buttons = []
         self.last_joy = 0.0
         self.last_odom = 0.0
+        self.odom_pose = None   # (x, y, yaw_deg) in the odom frame
 
         # /battery_state and /map are published rarely but latched (transient local), so
         # ask for the last value instead of waiting for the next one.
@@ -164,6 +166,8 @@ class TeleopMapper(Node):
 
     def on_odom(self, msg):
         self.last_odom = time.monotonic()
+        p, q = msg.pose.pose.position, msg.pose.pose.orientation
+        self.odom_pose = (p.x, p.y, math.degrees(2.0 * math.atan2(q.z, q.w)))
 
     def on_map(self, msg):
         self.map = msg
@@ -222,6 +226,7 @@ class Run:
         self.log_file = None
         self.slam = None
         self.bag = None
+        self.dock_odom = None
         self.recording = False
         self.status_shown = False
 
@@ -336,6 +341,21 @@ class Run:
         else:
             self.log('[OK]   Controller: connected')
 
+        # APEx: remember where the dock is. SLAM's map frame starts equal to the odom frame,
+        # so this is the dock's pose in the map; blueprint_merge uses it to line the map up
+        # with the room's CAD walls (the dock's place in the room is in <room>_dock.yaml).
+        if not node.docked and not self.args.no_dock:
+            self.log('[WAIT] Put the robot ON ITS DOCK first: the run records the dock\'s pose to line '
+                     'the map up with the CAD walls (Ctrl-C to cancel; --no-dock to skip this).')
+            while not node.docked:
+                self.wait(0.5)
+            self.wait(3.0)      # let it settle on the contacts
+        if node.docked and node.odom_pose is not None:
+            self.dock_odom = node.odom_pose
+            self.log('[OK]   Dock pose recorded (for lining the map up with the CAD walls)')
+        elif not node.docked:
+            self.log('[WARN] Not starting on the dock (--no-dock): the map cannot be anchored to '
+                     'the dock.')
         if node.docked:
             self.log('[WAIT] Robot is on the dock. Undock it: the robot menu (Undock), the '
                      'controller HOME button for 3 s, or back off with S in the GUI.')
@@ -344,7 +364,16 @@ class Run:
             self.wait(2.0)
         self.log('[OK]   Off the dock')
 
+        # With the dock power saver on, the TurtleBot starts the lidar itself on undocking. A
+        # second start while it spins up crashes the RPLIDAR driver ("Cannot start scan"), so
+        # give it a few seconds before asking.
+        end = time.monotonic() + 6.0
+        while time.monotonic() < end and node.scan_hz() < MIN_SCAN_HZ:
+            self.wait(0.5)
         for attempt in range(3):
+            if node.scan_hz() >= MIN_SCAN_HZ:
+                break
+            self.check_lidar_driver(node)
             node.start_motor()
             end = time.monotonic() + 10.0
             while time.monotonic() < end and node.scan_hz() < MIN_SCAN_HZ:
@@ -354,9 +383,19 @@ class Run:
             self.log(f'[WAIT] Lidar: no scans yet (try {attempt + 1}/3), restarting motor')
         hz = node.scan_hz()
         if hz < MIN_SCAN_HZ:
+            self.check_lidar_driver(node)
             raise RuntimeError(f'Lidar is not publishing /scan ({hz:.1f} Hz). Check the '
                                'lidar cable, or reboot the robot, and try again.')
         self.log(f'[OK]   Lidar: spinning, /scan {hz:.1f} Hz')
+
+    def check_lidar_driver(self, node):
+        """The RPLIDAR driver exits when it is started twice ("Cannot start scan"); then no
+        /start_motor helps - only restarting the TurtleBot's ROS service."""
+        if node.count_publishers('/scan') == 0:
+            raise RuntimeError('The lidar driver is not running (no /scan publisher; it crashes '
+                               'when the lidar is started twice). Restart the robot\'s ROS: '
+                               f'ssh -t {ROBOT_HINT} \'sudo systemctl restart turtlebot4\', '
+                               'wait about a minute, and try again.')
 
     def start_slam(self, node):
         cmd = ['ros2', 'launch', 'turtlebot4_navigation', 'slam.launch.py', 'sync:=false']
@@ -401,6 +440,7 @@ class Run:
         held_since = None
         last_motor_kick = 0.0
         slam_warned = False
+        driver_dead_warned = dock_warned = False
         bag_dir = os.path.join(self.run_dir, 'bag')
         while self.stop_reason is None:
             now = time.monotonic()
@@ -423,9 +463,25 @@ class Run:
 
             hz = node.scan_hz()
             if hz < MIN_SCAN_HZ and now - t0 > 5.0 and now - last_motor_kick > 10.0:
-                self.log(f'[WARN] Lidar dropped to {hz:.1f} Hz, restarting the motor')
-                node.start_motor()
                 last_motor_kick = now
+                if node.count_publishers('/scan') == 0:
+                    if not driver_dead_warned:
+                        self.log('[FAIL] The lidar driver has crashed (no /scan publisher): this run '
+                                 'records no lidar. Press Ctrl-C, run on the laptop: ssh -t '
+                                 f'{ROBOT_HINT} \'sudo systemctl restart turtlebot4\', wait 1 min, '
+                                 'and start again.')
+                        driver_dead_warned = True
+                elif node.docked:
+                    # the dock power saver stops the lidar on purpose; the TurtleBot starts it
+                    # again on undocking (restarting it here crashes the driver later)
+                    if not dock_warned:
+                        self.log('[WARN] Robot is on the dock: lidar paused by the dock power saver. '
+                                 'Undock to keep mapping.')
+                        dock_warned = True
+                else:
+                    dock_warned = False
+                    self.log(f'[WARN] Lidar dropped to {hz:.1f} Hz, restarting the motor')
+                    node.start_motor()
 
             elapsed = int(now - t0)
             parts = [f'REC {elapsed // 60:02d}:{elapsed % 60:02d}', f'lidar {hz:.1f} Hz']
@@ -482,6 +538,9 @@ class Run:
                     f'map_saved: {str(map_saved).lower()}\n'
                     f'posegraph_saved: {str(graph_saved).lower()}\n'
                     f'bag_ok: {str(bag_ok).lower()}\n')
+            if self.dock_odom is not None:
+                x, y, yaw = self.dock_odom
+                f.write(f'dock_odom: [{x:.3f}, {y:.3f}, {yaw:.2f}]   # docked pose, odom = map frame (x, y m, yaw deg)\n')
             if info:
                 f.write(f'map_size_m: [{info.width * info.resolution:.1f}, '
                         f'{info.height * info.resolution:.1f}]\n')
@@ -549,6 +608,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     parser.add_argument('--name', default=DEFAULT_NAME,
                         help='Run name, e.g. lab or lab_north (default: lab)')
+    parser.add_argument('--no-dock', action='store_true',
+                        help="don't wait for the robot to be on its dock at the start (APEx: the "
+                             "dock pose anchors the map to the CAD walls)")
     parser.add_argument('--no-controller', action='store_true',
                         help='Do not wait for the TurtleBot 4 controller; drive from the station '
                              'GUI and stop with Ctrl-C')

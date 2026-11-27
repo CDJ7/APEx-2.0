@@ -23,8 +23,12 @@ ROBOTICS, where the station and the FlexBase are). Two tools:
     ros2 run apex_bringup blueprint_merge --map ~/apex_maps/room101.yaml \\
         --blueprint ros2_ws/src/apex_mapping/Connor_Room101/blueprint/room101_blueprint.yaml
 
-  * aligns the SLAM map to the blueprint automatically (rotation search + ICP on the walls),
-    or from ``--guess x,y,deg`` / ``--pairs`` (same format as ``align_map``, points in the room frame),
+  * aligns the SLAM map to the blueprint. **Anchored on the dock** when ``<room>_dock.yaml`` sits
+    next to the blueprint (the dock's pose in the room frame) and the run recorded where the dock
+    is in the map (``dock_odom`` in the run's ``run.yaml``, written by ``teleop_map.py``): the
+    search only looks near that pose, so a nearly symmetric room can't be fitted the wrong way
+    round. Otherwise a full rotation search + ICP on the walls, or ``--guess x,y,deg`` /
+    ``--pairs`` (same format as ``align_map``, points in the room frame),
   * keeps the **walls from the CAD** and from SLAM only **what is inside the room and away from
     the walls** (benches, tables, the FlexBase, the station...). Everything SLAM saw through the
     windows, the open doors or beyond the walls is dropped,
@@ -399,6 +403,82 @@ def auto_align(slam: OccMap, bp: OccMap, step_deg: float = 2.0) -> tuple[Transfo
     return best[1], {"wall_match": best[0], "runner_up_other_rotation": runner, "icp_inliers": best[2]["inlier_fraction"]}
 
 
+def wall_scorer(bp: OccMap, tol: float = 0.15):
+    """score(T, pts) = fraction of SLAM wall points that land within ``tol`` of a blueprint wall."""
+    dist = _distance_field(bp.data[::-1] == OCCUPIED, bp.resolution)    # row 0 = bottom
+
+    def score(T: Transform2D, pts: np.ndarray) -> float:
+        p = T.apply(pts)
+        c = np.floor((p[:, 0] - bp.origin[0]) / bp.resolution).astype(int)
+        r = np.floor((p[:, 1] - bp.origin[1]) / bp.resolution).astype(int)
+        ok = (c >= 0) & (c < bp.w) & (r >= 0) & (r < bp.h)
+        d = np.full(len(p), 1.0)
+        d[ok] = dist[r[ok], c[ok]]
+        return float(np.mean(d < tol))
+    return score
+
+
+def dock_prior(dock_room: tuple[float, float, float], dock_map: tuple[float, float, float]) -> Transform2D:
+    """map -> room transform that puts the dock's map pose onto its room pose (yaw in degrees)."""
+    th = math.radians(dock_room[2] - dock_map[2])
+    R = Transform2D(th, 0.0, 0.0)
+    t = np.array(dock_room[:2], float) - R.apply(np.array([dock_map[:2]], float))[0]
+    return Transform2D(th, float(t[0]), float(t[1]))
+
+
+def dock_align(slam: OccMap, bp: OccMap, dock_room: tuple[float, float, float],
+               dock_map: tuple[float, float, float] = (0.0, 0.0, 0.0), max_shift: float = 0.8,
+               max_turn_deg: float = 15.0) -> tuple[Transform2D, dict[str, float]]:
+    """Align with the dock as the anchor: search only near the pose the dock gives (shift up to
+    ``max_shift`` m, turn up to ``max_turn_deg``), then ICP on the walls. Reports how far the fit
+    moved the dock from where ``dock_room`` says it is (``dock_offset_m``, ``dock_turn_deg``)."""
+    prior = dock_prior(dock_room, dock_map)
+    pts = slam.occupied_points()
+    if len(pts) > 2500:
+        pts = pts[np.random.default_rng(0).choice(len(pts), 2500, replace=False)]
+    score = wall_scorer(bp)
+    dm = np.array([dock_map[:2]], float)
+    best = (-1.0, prior)
+    for dth in np.arange(-max_turn_deg, max_turn_deg + 1e-9, 2.5):
+        th = prior.theta + math.radians(dth)
+        # turn about the dock, so the dock stays put while the rest swings
+        base = dock_prior((dock_room[0], dock_room[1], dock_room[2] + dth), dock_map)
+        for dx in np.arange(-max_shift, max_shift + 1e-9, 0.2):
+            for dy in np.arange(-max_shift, max_shift + 1e-9, 0.2):
+                T = Transform2D(th, base.tx + dx, base.ty + dy)
+                sc = score(T, pts)
+                if sc > best[0]:
+                    best = (sc, T)
+    occ_bp = bp.occupied_points()
+    T1, q1 = refine_icp(pts, occ_bp, best[1], iterations=30, max_dist=(0.6, 0.15))
+    T2, q2 = refine_icp(pts, occ_bp, T1, iterations=40, max_dist=(0.3, 0.06))
+    # keep whichever stage puts the most SLAM wall points on the CAD walls
+    _, T, q = max([(best[0], best[1], q1), (score(T1, pts), T1, q1), (score(T2, pts), T2, q2)], key=lambda c: c[0])
+    d_now = T.apply(dm)[0]
+    offset = float(np.hypot(*(d_now - np.array(dock_room[:2], float))))
+    turn = math.degrees(math.remainder(T.theta - prior.theta, 2 * math.pi))
+    return T, {"wall_match": score(T, pts), "icp_inliers": q["inlier_fraction"],
+               "dock_offset_m": round(offset, 3), "dock_turn_deg": round(turn, 2)}
+
+
+def load_dock(spec: str | Path) -> tuple[float, float, float]:
+    """'x,y,deg' or a <room>_dock.yaml ({dock: {x, y, yaw_deg}})."""
+    if isinstance(spec, str) and "," in spec and not Path(spec).exists():
+        x, y, d = (float(v) for v in spec.split(","))
+        return x, y, d
+    d = yaml.safe_load(Path(spec).read_text())["dock"]
+    return float(d["x"]), float(d["y"]), float(d.get("yaw_deg", 0.0))
+
+
+def run_dock_odom(map_yaml: str | Path) -> tuple[float, float, float] | None:
+    """The docked pose in the map frame, from run.yaml next to the map (teleop_map.py writes it)."""
+    run = Path(map_yaml).resolve().parent / "run.yaml"
+    if not run.exists():
+        return None
+    v = (yaml.safe_load(run.read_text()) or {}).get("dock_odom")
+    return (float(v[0]), float(v[1]), float(v[2])) if v else None
+
+
 def merge(slam: OccMap, bp: OccMap, map_to_room: Transform2D, wall_margin: float = 0.15,
           unseen: str = "unknown") -> tuple[OccMap, dict[str, Any]]:
     """Blueprint walls + SLAM's view of what is inside the room (away from the walls)."""
@@ -425,7 +505,8 @@ def merge(slam: OccMap, bp: OccMap, map_to_room: Transform2D, wall_margin: float
     return merged, report
 
 
-def _overlay(merged: OccMap, slam_in_room: OccMap | None, png: Path, title: str) -> None:
+def _overlay(merged: OccMap, slam_in_room: OccMap | None, png: Path, title: str,
+             dock: tuple[float, float, float] | None = None) -> None:
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -445,6 +526,10 @@ def _overlay(merged: OccMap, slam_in_room: OccMap | None, png: Path, title: str)
     axes[-1].set_title(title, fontsize=9)
     for a in axes:
         a.set_xlabel("x (m, room frame)")
+        if dock is not None:      # where the fit put the dock (the robot's start), arrow = facing
+            a.plot(dock[0], dock[1], "o", color="tab:blue", ms=7, mfc="none", mew=2)
+            a.arrow(dock[0], dock[1], 0.6 * math.cos(dock[2]), 0.6 * math.sin(dock[2]), color="tab:blue",
+                    width=0.04, length_includes_head=True)
     fig.savefig(png, dpi=120, bbox_inches="tight")
     plt.close(fig)
 
@@ -475,6 +560,12 @@ def main_merge(argv: list[str] | None = None) -> int:
     ap.add_argument("--blueprint", required=True, help="<room>_blueprint.yaml from cad_blueprint")
     ap.add_argument("--guess", help="map -> room frame 'tx,ty,deg' to start from (skips the search)")
     ap.add_argument("--pairs", help="pairs.yaml: {pairs: [{map: [x, y], lab: [x, y]}]} with lab = room-frame points")
+    ap.add_argument("--dock", help="dock pose in the room frame: 'x,y,deg' or a yaml "
+                    "(default: <room>_dock.yaml next to the blueprint, if there is one)")
+    ap.add_argument("--dock-map", help="dock pose in the SLAM map 'x,y,deg' (default: dock_odom from run.yaml "
+                    "next to the map; else 0,0,0 = the robot booted on its dock)")
+    ap.add_argument("--no-dock", action="store_true", help="don't anchor on the dock: full search")
+    ap.add_argument("--name", help="output base name (default: the map's file name)")
     ap.add_argument("--wall-margin", type=float, default=0.15, help="SLAM detail this close to a CAD wall is dropped (m)")
     ap.add_argument("--unseen", choices=["unknown", "free"], default="unknown",
                     help="floor the robot never saw: unknown (safe, default) or free")
@@ -483,21 +574,41 @@ def main_merge(argv: list[str] | None = None) -> int:
     slam = OccMap.load(args.map)
     bp = OccMap.load(args.blueprint)
     occ = slam.occupied_points()
+    dock_map = None
     if args.pairs:
         raw = yaml.safe_load(Path(args.pairs).read_text())["pairs"]
         T, rms = fit_rigid(np.array([p["map"] for p in raw], float), np.array([p["lab"] for p in raw], float))
         T, q = refine_icp(occ, bp.occupied_points(), T, max_dist=(0.4, 0.15))
         fit = {"pairs_rms_m": round(rms, 4), "icp_inliers": q["inlier_fraction"]}
     elif args.guess:
+        dock_map = None
         tx, ty, deg = (float(v) for v in args.guess.split(","))
         T, q = refine_icp(occ, bp.occupied_points(), Transform2D(math.radians(deg), tx, ty), max_dist=(0.6, 0.15))
         fit = {"icp_inliers": q["inlier_fraction"]}
     else:
-        T, fit = auto_align(slam, bp)
+        dock_file = Path(args.blueprint).with_name(Path(args.blueprint).stem.replace("_blueprint", "") + "_dock.yaml")
+        dock_spec = args.dock or (dock_file if dock_file.exists() else None)
+        if dock_spec and not args.no_dock:
+            dock_room = load_dock(dock_spec)
+            if args.dock_map:
+                dock_map, src = tuple(float(v) for v in args.dock_map.split(",")), "--dock-map"
+            elif (dm := run_dock_odom(args.map)) is not None:
+                dock_map, src = dm, "run.yaml"
+            else:
+                dock_map, src = (0.0, 0.0, 0.0), "assumed 0,0,0 (robot booted on its dock)"
+            print(f"anchored on the dock: room ({dock_room[0]:.2f}, {dock_room[1]:.2f}, {dock_room[2]:.1f} deg), "
+                  f"map ({dock_map[0]:.2f}, {dock_map[1]:.2f}, {dock_map[2]:.1f} deg) from {src}")
+            T, fit = dock_align(slam, bp, dock_room, dock_map)
+            if fit["dock_offset_m"] > 0.75 or abs(fit["dock_turn_deg"]) > 12:
+                print(f"WARNING: the fit moved the dock {fit['dock_offset_m']:.2f} m / {fit['dock_turn_deg']:.1f} deg "
+                      "from its pose in the dock file - check the picture; did the run start on the dock?")
+        else:
+            T, fit = auto_align(slam, bp)
+            dock_map = None
     merged, rep = merge(slam, bp, T, args.wall_margin, args.unseen)
     out_dir = args.out_dir or Path(args.map).resolve().parent
     out_dir.mkdir(parents=True, exist_ok=True)
-    stem = Path(args.map).stem
+    stem = args.name or Path(args.map).stem
     y = merged.save(out_dir / f"{stem}_merged.yaml")
     rep.update({"map_to_room": {"theta_deg": round(math.degrees(T.theta), 3), "tx": round(T.tx, 4), "ty": round(T.ty, 4)},
                 "fit": {k: round(float(v), 4) for k, v in fit.items()}, "blueprint": str(args.blueprint)})
@@ -515,8 +626,13 @@ def main_merge(argv: list[str] | None = None) -> int:
         (out_dir / f"{stem}_merge.json").write_text(json.dumps(rep, indent=2))
         print(f"wrote {yb} (TourBot building frame: Central Lobby = 0,0 - for sharing with TourBot)")
     slam_r = resample(slam, T, (bp.origin[0], bp.origin[1]), bp.w, bp.h, bp.resolution, UNKNOWN)
+    dock_in_room = T.apply_pose(*dock_map[:2], math.radians(dock_map[2])) if dock_map else None
+    if dock_in_room:
+        rep["dock_in_room"] = [round(dock_in_room[0], 3), round(dock_in_room[1], 3), round(math.degrees(dock_in_room[2]), 2)]
+        (out_dir / f"{stem}_merge.json").write_text(json.dumps(rep, indent=2))
     _overlay(merged, slam_r, out_dir / f"{stem}_merge.png",
-             f"merged: CAD walls + SLAM inside the room ({rep['floor_seen_fraction']:.0%} of the floor seen)")
+             f"merged: CAD walls + SLAM inside the room ({rep['floor_seen_fraction']:.0%} of the floor seen)",
+             dock=dock_in_room)
     print(f"map -> room: rotate {rep['map_to_room']['theta_deg']:.1f} deg, shift ({rep['map_to_room']['tx']:.2f}, "
           f"{rep['map_to_room']['ty']:.2f}) m; fit {rep['fit']}")
     if "runner_up_other_rotation" in fit and fit["runner_up_other_rotation"] > 0.8 * fit["wall_match"]:

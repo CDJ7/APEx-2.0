@@ -1,0 +1,17 @@
+# Where the TurtleBot 4's dock is in Room 101, in the room frame of room101_blueprint.yaml
+# (x along the long walls, origin at the floor's lower-left corner; metres, degrees).
+# The pose is the robot's base_link while it sits on the dock (yaw = the way the robot faces,
+# i.e. towards the dock).
+#
+# blueprint_merge anchors every SLAM map on this pose (the run records where the dock is in its
+# map), so the map can't be fitted to the nearly symmetric room the wrong way round.
+#
+# The dock is against the right (east) end wall, about 2.3 m up from the bottom-right corner,
+# near the bottom-right door; the robot faces the wall when docked. Values estimated on
+# 2026-11-27 from the dock-anchored Room 101 run 20261127_1717 (best fit to the CAD walls; first
+# run agreed within 0.4 m). If the dock moves, measure it with a tape and update this file. blueprint_merge
+# searches within 0.8 m / 15 deg of this pose.
+dock:
+  x: 19.03
+  y: 2.49
+  yaw_deg: -11.45

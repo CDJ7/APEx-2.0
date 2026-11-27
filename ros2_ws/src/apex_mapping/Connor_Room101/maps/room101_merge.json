@@ -1,17 +1,27 @@
 {
-  "floor_seen_fraction": 0.918,
-  "objects_m2": 15.94,
-  "slam_occupied_dropped_outside_room": 2117,
+  "floor_seen_fraction": 0.962,
+  "objects_m2": 15.18,
+  "slam_occupied_dropped_outside_room": 3432,
   "wall_margin_m": 0.15,
   "unseen_floor": "unknown",
   "map_to_room": {
-    "theta_deg": -5.326,
-    "tx": 19.0094,
-    "ty": 4.5404
+    "theta_deg": -5.47,
+    "tx": 19.0483,
+    "ty": 2.5025
   },
   "fit": {
-    "icp_inliers": 0.1133
+    "wall_match": 0.1784,
+    "icp_inliers": 0.196,
+    "dock_offset_m": 0.373,
+    "dock_turn_deg": 0.15
   },
   "blueprint": "ros2_ws/src/apex_mapping/Connor_Room101/blueprint/room101_blueprint.yaml",
-  "building_map": "room101_building.yaml"
+  "building_map": "room101_building.yaml",
+  "dock_in_room": [
+    19.025,
+    2.485,
+    -11.45
+  ],
+  "source_run": "room101/20261127_1717 (9.3 min, started on the dock, driven from the station GUI)",
+  "cleaned": "temporary clutter removed after the merge (isolated specks, chair/stool leg clusters, wall-trim scraps); room101_building regenerated from the cleaned map"
 }
