@@ -20,13 +20,20 @@ ros2_ws/src/apex_mapping/tools/map_lab.sh room101                  # TurtleBot 4
 ros2_ws/src/apex_mapping/tools/map_lab.sh room101 --no-controller  # drive from the GUI
 ```
 
-The run is copied to `~/apex_maps/runs/room101/<date_time>/`, and the laptop builds the map again
-from the raw lidar data as `rebuilt.pgm` (cleaner than the robot's own `map.pgm`).
+The run is copied to `~/apex_maps/runs/room101/<date_time>/`. The laptop then builds the map
+again from the raw lidar data (`rebuilt.pgm`) and **merges it into the CAD blueprint by itself**
+(`room101_merged.*` in the run folder, see below), anchored on the dock.
 
-How to drive: start at the dock, go slowly, **one loose lap about 1 m from the walls** (so the
-map can be lined up with the blueprint), then **everything inside the room** - benches, tables,
-the FlexBase, the station - and finish over the start point to close the loop. You do **not**
-need to trace the walls or worry about the windows: they come from the CAD blueprint below.
+How to drive:
+1. **Start with the robot on its dock** (right end wall, about 2 m up from the bottom-right corner,
+   near the bottom-right door). The run records the dock's pose; that is what lines the map up with
+   the CAD walls, so a run that doesn't start docked can be fitted the wrong way round.
+2. Go slowly. **Focus on what is inside the room** - benches, tables, the FlexBase, the station,
+   cabinets - and drive around each of them so the lidar sees all their sides.
+3. You do **not** need to trace the walls, fill gaps along them or worry about the windows: the
+   walls, glass and doors come from the CAD blueprint. Seeing some wall now and then helps the
+   fine fit, which a normal drive between the objects does anyway.
+4. Finish over the start point to close the loop, then stop.
 
 ## The blueprint: walls, windows and doors from the building's CAD drawing
 
@@ -56,12 +63,19 @@ ros2 run apex_bringup blueprint_merge --map ~/apex_maps/room101.yaml \
     --blueprint $D/blueprint/room101_blueprint.yaml --out-dir $D/maps
 ```
 
-`--map` is `~/apex_maps/room101.yaml` for method A; for method B use the run's rebuilt map,
-`~/apex_maps/runs/room101/<date_time>/rebuilt.yaml`.
+Method B (`map_lab.sh room101`) runs this for you and writes the files into the run folder;
+it prints the `cp` line that puts them into `maps/`. By hand, `--map` is `~/apex_maps/room101.yaml`
+for method A, or `~/apex_maps/runs/room101/<date_time>/rebuilt.yaml` for method B (add
+`--name room101`).
 
-* Lines the SLAM map up with the CAD walls on its own (every rotation tried, then ICP). If it
-  prints a WARNING that another rotation fits almost as well, look at the picture and re-run
-  with `--guess tx,ty,deg` (map -> room frame) or `--pairs`.
+* **Anchored on the dock:** [`blueprint/room101_dock.yaml`](blueprint/room101_dock.yaml) is the
+  dock's pose in the room frame, and the run's `run.yaml` has the dock's pose in the map
+  (`dock_odom`). The fit only searches within 0.8 m / 15 deg of what they give, then ICP on the
+  walls. The check picture marks the dock with a blue circle. If the dock moves, measure it and
+  update `room101_dock.yaml`. Without `dock_odom` (GUI method A) it assumes the robot booted on
+  its dock (`--dock-map x,y,deg` to give it); `--no-dock` does a full search instead.
+* Room 101 is nearly symmetric: without the dock the full search can pick the room the wrong way
+  round (it did on the first run). If it prints a WARNING, check the picture.
 * Writes into `maps/`:
   * `room101_merged.yaml/.pgm` - **the map to use**: CAD walls / glass / doors + only what your
     map saw **inside** the room, more than 15 cm from the walls. Everything seen through the
