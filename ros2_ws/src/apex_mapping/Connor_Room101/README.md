@@ -20,7 +20,8 @@ ros2_ws/src/apex_mapping/tools/map_lab.sh room101                  # TurtleBot 4
 ros2_ws/src/apex_mapping/tools/map_lab.sh room101 --no-controller  # drive from the GUI
 ```
 
-The run is copied to `~/apex_maps/runs/room101/<date_time>/`.
+The run is copied to `~/apex_maps/runs/room101/<date_time>/`, and the laptop builds the map again
+from the raw lidar data as `rebuilt.pgm` (cleaner than the robot's own `map.pgm`).
 
 How to drive: start at the dock, go slowly, **one loose lap about 1 m from the walls** (so the
 map can be lined up with the blueprint), then **everything inside the room** - benches, tables,
@@ -54,6 +55,9 @@ D=ros2_ws/src/apex_mapping/Connor_Room101
 ros2 run apex_bringup blueprint_merge --map ~/apex_maps/room101.yaml \
     --blueprint $D/blueprint/room101_blueprint.yaml --out-dir $D/maps
 ```
+
+`--map` is `~/apex_maps/room101.yaml` for method A; for method B use the run's rebuilt map,
+`~/apex_maps/runs/room101/<date_time>/rebuilt.yaml`.
 
 * Lines the SLAM map up with the CAD walls on its own (every rotation tried, then ICP). If it
   prints a WARNING that another rotation fits almost as well, look at the picture and re-run

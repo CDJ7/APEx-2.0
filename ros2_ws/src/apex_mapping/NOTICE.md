@@ -11,7 +11,7 @@ is not changed.
 | `config/slam.yaml` | `tourbot_sim/config/slam.yaml` | header comment |
 | `scripts/teleop_map.py` | `tourbot_navigation/scripts/teleop_map.py` | run name instead of floor, `~/apex_maps/runs`, `--no-controller`, APEx wording |
 | `scripts/teleop_map.sh` | `tourbot_navigation/scripts/teleop_map.sh` | tour-stack service handling removed |
-| `tools/map_lab.sh` | `tourbot_navigation/tools/map_floor.sh` | robot address, folders, copies the scripts to the robot, robot package check |
+| `tools/map_lab.sh` | `tourbot_navigation/tools/map_floor.sh` | robot address, folders, copies the scripts to the robot, robot package check, rebuilds the map on the laptop afterwards |
 | `tools/map_view.rviz` | `tourbot_navigation/tools/map_view.rviz` | header comment |
 | `../../../docs/MAPPING_ON_ROBOT.md` | `docs/teleop-mapping.md` | rewritten for APEx |
 | `Connor_Room101/blueprint/room101_blueprint.*` | derived from `cad/dxf/Level 1.dxf` (the building's floor plan) | Room 101 only, rasterised by `apex_bringup/blueprint.py` (`cad_blueprint`); the DXF itself is **not** copied into this repository |

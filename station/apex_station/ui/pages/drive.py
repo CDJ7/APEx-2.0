@@ -349,6 +349,9 @@ class DrivePage(Page):
             note, color = blocked, theme.WARN
         elif not self.enable.isChecked():
             note, color = "Switch on Driving enabled, then hold W A S D.", theme.MUTED
+        elif snap.error:
+            # e.g. the GUI was started without `source /opt/ros/jazzy/setup.bash`
+            note, color = f"Can't drive: {snap.error}", theme.BAD
         elif listeners == 0:
             note, color = "Robot not listening on /cmd_vel (not on the network?).", theme.BAD
         else:

@@ -1,0 +1,17 @@
+{
+  "floor_seen_fraction": 0.918,
+  "objects_m2": 15.94,
+  "slam_occupied_dropped_outside_room": 2117,
+  "wall_margin_m": 0.15,
+  "unseen_floor": "unknown",
+  "map_to_room": {
+    "theta_deg": -5.326,
+    "tx": 19.0094,
+    "ty": 4.5404
+  },
+  "fit": {
+    "icp_inliers": 0.1133
+  },
+  "blueprint": "ros2_ws/src/apex_mapping/Connor_Room101/blueprint/room101_blueprint.yaml",
+  "building_map": "room101_building.yaml"
+}
