@@ -92,10 +92,10 @@ ros2 launch apex_bringup sim.launch.py rviz:=true
 
 Expected, within about 30 s:
 
-* Gazebo opens with the lab: grey walls, the dark FlexBase block in the middle, the orange
+* Gazebo opens with the lab inside Room 101 (walls from the building's CAD plan, 2 m high): grey walls, the dark FlexBase block in the middle, the orange
   chute and funnel on its east end with the grey chute support, the red return bin, two brown
   station tables.
-* The TurtleBot 4 sits on its dock at the `dock` pose (east wall, lower right in the figure).
+* The TurtleBot 4 sits on its dock at the `dock` pose (east of the loop, lower right in the figure).
 * RViz shows the generated map (`maps/apex_lab.yaml`) with the laser scan lining up with the
   walls. If the scan is offset, use **2D Pose Estimate** in RViz at the dock.
 * `ros2 action list | grep navigate` lists `/navigate_to_pose` and `/navigate_through_poses`

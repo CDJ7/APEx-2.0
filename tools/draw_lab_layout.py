@@ -24,7 +24,8 @@ from apex_bringup.lab_model import LabModel  # noqa: E402
 LAB = LabModel.load()
 FB_W, FB_D = LAB.raw["flexbase"]["width"], LAB.raw["flexbase"]["depth"]   # 6 ft model: 1.829 m x 1.016 m
 ISLAND = LAB.island                       # xmin, ymin, xmax, ymax
-OUTER = LAB.outer
+LOOP = LAB.loop_bounds()                  # island + one corridor width all round
+VIEW = LAB.view_bounds(0.7)
 STYLE = {  # name: (colour, label)
     "transfer": ("#1A7F8E", "Transfer pose\n(tray under funnel)"),
     "transfer_staging": ("#7FB8C0", "Transfer\nstaging"),
@@ -41,9 +42,14 @@ CORNERS = list(LAB.corners.values())      # loop waypoints (corridor centre)
 
 def main() -> None:
     fig, ax = plt.subplots(figsize=(11, 8))
-    ox0, oy0, ox1, oy1 = OUTER
+    ox0, oy0, ox1, oy1 = LOOP
+    vx0, vy0, vx1, vy1 = VIEW
     ix0, iy0, ix1, iy1 = ISLAND
-    ax.add_patch(Rectangle((ox0, oy0), ox1 - ox0, oy1 - oy0, fc="#F4F6F8", ec="#555", lw=2))
+    rx0, ry0, rx1, ry1 = LAB.outer
+    ax.add_patch(Rectangle((rx0, ry0), rx1 - rx0, ry1 - ry0, fc="#FBFCFD", ec="none"))        # room floor
+    for wb in LAB.walls():                                                                   # room walls (CAD)
+        ax.add_patch(Rectangle((wb.xmin, wb.ymin), wb.sx, wb.sy, fc="#4D4D4D", ec="none"))
+    ax.add_patch(Rectangle((ox0, oy0), ox1 - ox0, oy1 - oy0, fc="#F4F6F8", ec="#1A7F8E", lw=1.5, ls="--"))
     ax.add_patch(Rectangle((ix0, iy0), ix1 - ix0, iy1 - iy0, fc="#DDE3E8", ec="#555", lw=2, hatch="//", alpha=0.6))
     ax.text((ix0 + ix1) / 2 - 0.3, iy0 - 0.12,
             "Robot danger zone (workspace + stopping distance) must stay inside the FlexBase guarding.\n"
@@ -94,19 +100,23 @@ def main() -> None:
         ax.text(ob.xmax + 0.05, ob.cy + 0.15, ob.name, fontsize=7, ha="left", va="center", color="#C0392B",
                 bbox=dict(fc="white", ec="none", alpha=0.8, pad=0.5))
     ax.annotate("", xy=(ox1, oy0 - 0.3), xytext=(ox0, oy0 - 0.3), arrowprops=dict(arrowstyle="<->"))
-    ax.text((ox0 + ox1) / 2, oy0 - 0.55, f"{ox1 - ox0:.2f} m (proposed room footprint)", ha="center")
+    ax.text((ox0 + ox1) / 2, oy0 - 0.55, f"{ox1 - ox0:.2f} m (loop footprint: island + 5 ft lane)", ha="center")
     ax.annotate("", xy=(ox0 - 0.25, oy1), xytext=(ox0 - 0.25, oy0), arrowprops=dict(arrowstyle="<->"))
     ax.text(ox0 - 0.45, 0, f"{oy1 - oy0:.2f} m", va="center", rotation=90)
     ax.set_aspect("equal")
-    ax.set_xlim(ox0 - 0.7, ox1 + 0.4)
-    ax.set_ylim(oy0 - 0.7, oy1 + 0.4)
+    ax.set_xlim(vx0, vx1)
+    ax.set_ylim(vy0, vy1)
     ax.set_xlabel("x (m) - map frame, origin = FlexBase centre")
     ax.set_ylabel("y (m)")
-    ax.set_title("APEx 2.0 - lab layout from lab.yaml (PROPOSED - confirm against the real room)")
+    room = LAB.raw.get("room") or {}
+    where = (f"in Room 101 at {room.get('flexbase_in_room')} (CAD walls, placement TBD)" if LAB.room is not None
+             else "PROPOSED - confirm against the real room")
+    ax.set_title(f"APEx 2.0 - lab layout from lab.yaml {where}", fontsize=10)
     ax.grid(alpha=0.25)
     out = Path(__file__).resolve().parents[1] / "docs" / "img" / "lab_layout.png"
     fig.savefig(out, dpi=150, bbox_inches="tight")
-    print("outer footprint", round(ox1 - ox0, 2), "x", round(oy1 - oy0, 2), "m ->", out)
+    print("loop footprint", round(ox1 - ox0, 2), "x", round(oy1 - oy0, 2), "m; room floor",
+          round(rx1 - rx0, 2), "x", round(ry1 - ry0, 2), "m ->", out)
 
 
 if __name__ == "__main__":

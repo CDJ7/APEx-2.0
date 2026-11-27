@@ -59,7 +59,7 @@ def test_world_sdf_has_all_models(lab):
     sdf = generate_lab.world_sdf(lab, ["barrier_north"])
     names = {m.get("name") for m in ET.fromstring(sdf).iter("model")}
     for n in ("flexbase", "chute_support", "return_bin", "chute", "funnel", "barrier_north", "station_a_table",
-              "wall_north", "ground_plane"):
+              "wall_000", "ground_plane"):
         assert n in names
 
 

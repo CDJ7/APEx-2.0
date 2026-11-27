@@ -28,3 +28,16 @@ def config_dir() -> Path:
 
 def config_file(name: str) -> Path:
     return config_dir() / name
+
+
+def package_file(package: str, rel: str) -> Path:
+    """A file of another APEx package (e.g. apex_mapping's Room 101 blueprint): the source checkout
+    next to this one, or the installed share directory."""
+    src = _SRC_ROOT.parent / package / rel
+    if src.exists():
+        return src
+    try:
+        from ament_index_python.packages import get_package_share_directory
+        return Path(get_package_share_directory(package)) / rel
+    except Exception as exc:  # pragma: no cover
+        raise FileNotFoundError(f"{package}/{rel} not found") from exc
