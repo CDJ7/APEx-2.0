@@ -91,7 +91,22 @@ for method A, or `~/apex_maps/runs/room101/<date_time>/rebuilt.yaml` for method 
 ## Align it with lab.yaml, then use it for navigation
 
 The poses, routes and the FlexBase keepout zone are in the `lab.yaml` frame (origin at the
-FlexBase centre). Align the map once (details:
+FlexBase centre). `lab.yaml` already uses this room: `room:` points at
+`blueprint/room101_blueprint.yaml` (the Gazebo world and the generated Nav2 map have these
+walls) and at `maps/room101_merged.yaml`.
+
+**Easiest way (no pairs):** measure where the FlexBase centre stands in the room frame (tape
+from the room's (0, 0) corner, see below) and its yaw, put it in `lab.yaml` →
+`room.flexbase_in_room`, and run `generate_lab.py`. It writes the merged map in the lab frame
+as `apex_bringup/maps/apex_lab_real.yaml`:
+
+```bash
+ros2 run apex_bringup layout_check                  # does the loop fit round the furniture here?
+python3 ros2_ws/src/apex_bringup/apex_bringup/generate_lab.py
+ros2 launch apex_bringup robot.launch.py map:=$(ros2 pkg prefix apex_bringup)/share/apex_bringup/maps/apex_lab_real.yaml keepout:=true
+```
+
+**With pairs** (any map, or to double-check the tape measurements) - details:
 [`apex_bringup/README.md`](../../apex_bringup/README.md#aligning-a-real-slam-map-with-labyaml-task-m3)):
 
 ```bash

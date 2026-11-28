@@ -19,7 +19,7 @@ should drive the loop at least as well as Nav2.
 | Real robot on the lab network | Netgear router, robot `192.168.0.3` on 5 GHz, laptop wired, time sync chain, SSH, dock power saver off | `docs/TURTLEBOT_NETWORK.md` |
 | Manual driving | W A S D on the station GUI's Drive & Map page (stops on key release); terminal fallback | `station/apex_station/ui/pages/drive.py`, `station/tools/teleop_wasd.py` |
 | Live sensors in the HMI | lidar plot + camera at 10 fps, clock offset check | station *Sensors* page |
-| Lab model | single `lab.yaml` → Gazebo worlds, Nav2 map, keepout mask, layout figure; now with the direct chute, funnel and return bin | `ros2_ws/src/apex_bringup` |
+| Lab model | single `lab.yaml` → Gazebo worlds, Nav2 map, keepout mask, layout figure; direct chute, funnel and return bin; **Room 101's real walls from CAD** (`room:`), `layout_check` against the team's map | `ros2_ws/src/apex_bringup` |
 | Job logic | job state machine with timeouts and faults, two-direction routing with remembered blockages, shortfall handling, tray dump + interlock | `apex_orchestrator` (66 workspace tests) |
 | Nav2 interface | non-blocking adapter on TurtleBot4Navigator: routes, final approach, dock / undock, battery, pose | `apex_orchestrator/nav2_adapter.py` (**not run yet**) |
 | Simulation launch | Gazebo + TurtleBot 4 + AMCL + Nav2 + APEx stack, three demos | `apex_bringup/launch/{sim,apex,demo}.launch.py` (**not run yet**) |

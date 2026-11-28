@@ -6,12 +6,13 @@ Built in the **Simulation Bring-up** stage; see `docs/SIMULATION.md` for the ful
 | Package | Type | Role |
 |---|---|---|
 | [`apex_interfaces`](src/apex_interfaces/README.md) | ament_cmake | messages and services |
-| [`apex_bringup`](src/apex_bringup/README.md) | ament_python | `lab.yaml` (single source of lab geometry), generated Gazebo worlds + Nav2 maps, configs, launch files |
+| [`apex_bringup`](src/apex_bringup/README.md) | ament_python | `lab.yaml` (single source of lab geometry, inside Room 101's CAD walls), generated Gazebo worlds + Nav2 maps, configs, launch files; tools `generate_lab`, `layout_check`, `align_map`, `cad_blueprint`, `blueprint_merge` |
 | [`apex_plc_bridge`](src/apex_plc_bridge/README.md) | ament_python | the only connection to the FlexBase PLC; write allow-list; network profiles |
 | [`apex_cell_sim`](src/apex_cell_sim/README.md) | ament_python | simulated cell with the real tag names and timing |
 | [`apex_orchestrator`](src/apex_orchestrator/README.md) | ament_python | job state machine, loop routing, Nav2 adapter, demos |
 | [`apex_tilt`](src/apex_tilt/README.md) | ament_python | tilting return tray on the TurtleBot: controller + interlocks, `tilt_platform` node (runs on the robot) |
 | [`apex_rl`](src/apex_rl/README.md) | ament_python | Learning-Based Navigation: 2D training environment from `lab.yaml` (Gymnasium), baseline, evaluation, PPO training |
+| [`apex_mapping`](src/apex_mapping/README.md) | ament_cmake | mapping the room with the real TurtleBot (adapted from TourBot, see `NOTICE.md`); `Connor_Room101/`: Room 101 CAD blueprint + the team's real map, both used by `lab.yaml` → `room:` |
 
 ```
 station GUI ──services──► apex_orchestrator ──NavPort──► Nav2 / TurtleBot 4 (Gazebo or real)

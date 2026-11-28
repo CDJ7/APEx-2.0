@@ -2,7 +2,8 @@
 #
 # Generated from this file (never edit the outputs by hand):
 #   worlds/apex_lab*.sdf          Gazebo world(s)
-#   maps/apex_lab.{pgm,yaml}      Nav2 occupancy map (until the real SLAM map exists)
+#   maps/apex_lab.{pgm,yaml}      Nav2 occupancy map from the CAD walls + lab.yaml objects
+#   maps/apex_lab_real.{pgm,yaml} the team's real Room 101 map moved into the lab frame (if room.real_map)
 #   maps/apex_lab_keepout.{pgm,yaml}  Nav2 keepout mask (FlexBase island)
 #   docs/img/lab_layout.png       layout figure
 # Regenerate:  python3 ros2_ws/src/apex_bringup/apex_bringup/generate_lab.py
@@ -18,15 +19,27 @@ flexbase:                    # Automation NTH FlexBase 6 ft model (confirmed)
   depth: 1.016               # 40 in, along y
   height: 2.286              # 7'6" maximum (brochure)
 
+room:                        # the REAL room: Room 101 (ROBOTICS) walls, windows and doors from the building's CAD
+                             # floor plan (apex_mapping/Connor_Room101/blueprint, see cad_blueprint)
+  blueprint: {package: apex_mapping, path: Connor_Room101/blueprint/room101_blueprint.yaml}
+  # Where the FlexBase centre stands in the room frame (x, y in m from the room's (0, 0) corner, x along
+  # the long wall; yaw in deg, 0 = FlexBase 72" side parallel to the long wall).  [TBD: MEASURE - M1]
+  # This proposal centres the layout in the room; `layout_check` shows how it fits around the real
+  # furniture in the team's map and `layout_check --search` lists free spots.
+  flexbase_in_room: [9.73, 4.97, 0]
+  # the team's real map in the room frame (blueprint_merge output) - used by layout_check and to
+  # write maps/apex_lab_real.* (the real map already in the lab frame, no align_map needed)
+  real_map: {package: apex_mapping, path: Connor_Room101/maps/room101_merged.yaml}
+
 island:                      # TurtleBot keep-out area around the cell (Nav2 keepout zone)
   clearance: 0.30            # service / door clearance on every side      [TBD: door swing]
   x_extension: 0.45          # extra length on +x for the chute support + return bin (no conveyor any more)
 
-corridor_width: 1.524        # 5 ft loop corridor all round the island
+corridor_width: 1.524        # 5 ft driving lane round the island (loop corners below sit on its centre line)
 
-walls:
-  height: 1.0
-  thickness: 0.10
+walls:                       # room walls in the Gazebo world (shape from room.blueprint when set)
+  height: 2.0
+  thickness: 0.10            # only used without room.blueprint (plain corridor box)
 
 transfer_mode: D             # D = KUKA drops each part straight into the gravity chute (CHOSEN 2026-11-19)
                              # (A pusher / B conveyor + gravity chute / C tilt tray remain in the cell sim)
@@ -59,8 +72,11 @@ return_bin:                  # damaged-part bin next to the FlexBase: the robot 
   y_max: 0.80               # stays inside the island (north edge y = 0.808)
   height: 0.30               # rim below the tilted tray edge
 
-stations:                    # physical delivery-station tables against the outer walls
+stations:                    # delivery-station tables (free-standing, lab frame)         [TBD: real tables]
   table_size: [1.0, 0.30, 0.75]   # x, y, height
+  tables:                         # table centre behind each station pose
+    station_a: [0.0,  2.18]
+    station_b: [0.0, -2.18]
 
 robot:                       # TurtleBot 4 standard (user manual)
   radius: 0.171              # 342 x 339 mm footprint
@@ -85,9 +101,11 @@ loop:                        # corridor centre-line corners, counter-clockwise o
 
 obstacles:                   # available obstacle models; worlds/scenarios choose which are present
   box_small:      {center: [-1.30,  1.57], size: [0.40, 0.40, 0.40]}   # Nav2 drives round it
-  barrier_north:  {center: [ 1.40,  1.57], size: [0.30, 1.52, 0.60]}   # blocks the north corridor
-  barrier_south:  {center: [ 0.90, -1.57], size: [0.30, 1.52, 0.60]}   # blocks the south corridor
+  # "span" barriers reach from the island edge to the nearest room wall on that side, so they block
+  # that side of the loop wherever the FlexBase stands in the room (reroute demo)
+  barrier_north:  {x: 1.40, span: north, thickness: 0.30, height: 0.60}
+  barrier_south:  {x: 0.90, span: south, thickness: 0.30, height: 0.60}
 
 map:
   resolution: 0.05           # m/pixel, same as the TurtleBot 4 SLAM default
-  margin: 0.30               # free border around the outer walls
+  margin: 0.30               # border round the room (or the outer walls) in the generated maps

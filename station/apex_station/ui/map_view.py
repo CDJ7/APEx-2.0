@@ -33,9 +33,8 @@ class LabMapView(QWidget):
         self.status: dict[str, Any] = {}
         self.setMinimumSize(420, 320)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        x0, y0, x1, y1 = self.lab.outer
-        m = 0.25
-        self.world = QRectF(x0 - m, y0 - m, (x1 - x0) + 2 * m, (y1 - y0) + 2 * m)
+        x0, y0, x1, y1 = self.lab.view_bounds(0.6)      # the loop + a margin (the room can be much larger)
+        self.world = QRectF(x0, y0, x1 - x0, y1 - y0)
 
     def set_status(self, status: dict[str, Any]) -> None:
         self.status = status
@@ -69,11 +68,16 @@ class LabMapView(QWidget):
         lab = self.lab
         s, _, _ = self._scale()
 
-        # room + walls
+        # room floor + walls (the real room's CAD walls with lab.yaml room:)
+        p.setClipRect(self.rect_px(self.world.left(), self.world.top(), self.world.right(), self.world.bottom()))
         x0, y0, x1, y1 = lab.outer
-        p.setPen(QPen(QColor(theme.MUTED), 3))
+        p.setPen(Qt.NoPen)
         p.setBrush(QColor("#11161d"))
         p.drawRect(self.rect_px(x0, y0, x1, y1))
+        p.setBrush(QColor(theme.MUTED))
+        for w in lab.walls():
+            p.drawRect(self.rect_px(w.xmin, w.ymin, w.xmax, w.ymax))
+        p.setClipping(False)
         # island (TurtleBot keep-out)
         ix0, iy0, ix1, iy1 = lab.island
         p.setPen(QPen(QColor(theme.FAINT), 1, Qt.DashLine))

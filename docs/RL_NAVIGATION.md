@@ -30,7 +30,7 @@ and reward are in one file (`apex_rl/env.py`).
 
 | Part | What |
 |---|---|
-| World | **built from `lab.yaml`** - the same walls, FlexBase, chute support, return bin, tables and keepout island as the Gazebo worlds and the Nav2 map. When `lab.yaml` is measured (M1), training follows the real room. |
+| World | **built from `lab.yaml`** - the same walls (Room 101 from CAD), FlexBase, chute support, return bin, tables and keepout island as the Gazebo worlds and the Nav2 map. When `flexbase_in_room` is measured (M1), training follows the real room. The real furniture is not in it (only in the team's map) - random boxes stand in for clutter |
 | Robot | circle r = 0.19 m (Nav2 footprint); unicycle; v ≤ 0.31 m/s (safe mode), reverse ≤ 0.10 m/s, ω ≤ 1 rad/s; acceleration limits like Nav2's velocity smoother; 10 Hz control |
 | Lidar | 36 beams over 360° (RPLIDAR A1 downsampled), 0.15-3.5 m. **The keepout island is added as virtual walls**, the same way Nav2's costmap sees the keepout mask - on the robot, a policy node would merge the mask into the scan from the map pose |
 | Episode | random start (a named pose or a corridor point) and goal ≥ 1.5 m away; the **loop router** gives the waypoints (20 % of episodes the longer way round); ends on arrival (within 0.15 m **and stopped**), a collision, entering the keepout, or a timeout |
@@ -43,13 +43,15 @@ and reward are in one file (`apex_rl/env.py`).
 
 ## 3. Reference results
 
-Evaluated on 100 fixed held-out seeds (10 000+, never used in training):
+Evaluated on 100 fixed held-out seeds (10 000+, never used in training). Baseline re-run on
+2026-11-27 with Room 101's CAD walls (before: 100 % / 96 % in the plain corridor box); the PPO
+rows are from the corridor box:
 
 | Driver | Scenario | Success | Collision | Keepout | Timeout | Time to goal |
 |---|---|---|---|---|---|---|
 | random actions | empty / clutter | 0 % / 0 % | 54 % / 58 % | 30 % / 22 % | 16 % / 20 % | - |
-| **baseline** (waypoint follower + reactive avoidance) | empty | **100 %** | 0 % | 0 % | 0 % | 17.2 s |
-| **baseline** | clutter (training distribution) | **96 %** | 0 % | 0 % | 4 % | 21.7 s |
+| **baseline** (waypoint follower + reactive avoidance) | empty | **100 %** | 0 % | 0 % | 0 % | 17.1 s |
+| **baseline** | clutter (training distribution) | **94 %** | 0 % | 0 % | 6 % | 21.0 s |
 | PPO, 300 k steps (~3 min, pipeline check) | empty | 100 % | 0 % | 0 % | 0 % | 16.9 s |
 | PPO, 300 k steps (~3 min, pipeline check) | clutter | 79 % | 21 % | 0 % | 0 % | 18.7 s |
 

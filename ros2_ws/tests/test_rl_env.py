@@ -63,10 +63,10 @@ def test_driving_into_the_island_is_a_keepout_violation():
     assert term and info["event"] == "keepout" and r < -5
 
 
-def test_driving_into_a_wall_is_a_collision():
+def test_driving_into_a_table_is_a_collision():
     env = ApexNavEnv(EnvConfig(randomize=False, max_obstacles=0))
-    d = env.lab.poses["dock"]
-    env.reset(seed=0, options={"start": (d.x - 0.3, d.y, 0.0), "goal": (0.0, -1.75)})   # facing the east wall
+    s = env.lab.poses["station_a"]
+    env.reset(seed=0, options={"start": (s.x, s.y, math.pi / 2), "goal": (0.0, -1.75)})   # facing the station A table
     for _ in range(60):
         _, r, term, _, info = env.step(np.array([1.0, 0.0], np.float32))
         if term:

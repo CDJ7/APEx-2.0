@@ -28,9 +28,9 @@ def draw_episode(env: Any, path: str | Path | None = None, title: str = "", as_a
     ax.add_patch(Circle(tuple(t[-1]), env.cfg.radius, fc="#27ae60", alpha=0.5))
     ax.plot(*env.ep.path[-1], "*", color="#8e44ad", ms=14, label="goal")
     ax.set_aspect("equal")
-    x0, y0, x1, y1 = env.lab.outer
-    ax.set_xlim(x0 - 0.3, x1 + 0.3)
-    ax.set_ylim(y0 - 0.3, y1 + 0.3)
+    x0, y0, x1, y1 = env.lab.view_bounds(0.6)
+    ax.set_xlim(x0, x1)
+    ax.set_ylim(y0, y1)
     ax.legend(loc="upper right", fontsize=7)
     ax.set_title(title or f"{env.ep.start_name} -> {env.ep.goal_name} ({env.ep.route_direction})", fontsize=9)
     out = None

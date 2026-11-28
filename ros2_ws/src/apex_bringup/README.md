@@ -8,12 +8,16 @@ Every number about the lab lives in `config/lab.yaml`: FlexBase 6 ft footprint
 (72" × 40" = 1.829 m × 1.016 m), the guarded island around it, 5 ft (1.524 m) loop corridors,
 the **gravity chute** and **funnel** (transfer mode D - the KUKA drops parts straight in), the
 chute support, the **return bin**, the station tables, the TurtleBot 4 footprint, the named poses and the loop
-corners. `apex_bringup/lab_model.py` loads it; everything else reads that model:
+corners - and the **real room**: `room:` names Room 101's CAD blueprint (walls, windows, doors) and where the
+FlexBase stands in it (`flexbase_in_room`, see below). `apex_bringup/lab_model.py` loads it (with `room.py` for
+the blueprint); everything else reads that model:
 
 ```
 config/lab.yaml ──► lab_model.py ──► generate_lab.py ──► worlds/*.sdf   (Gazebo Harmonic)
                                    │                   └► maps/apex_lab.{pgm,yaml}          (AMCL / Nav2)
                                    │                   └► maps/apex_lab_keepout.{pgm,yaml}  (optional keepout mask)
+                                   │                   └► maps/apex_lab_real.{pgm,yaml}     (team's real map, lab frame)
+                                   ├► layout_check.py (does the loop fit round the real furniture?)
                                    ├► apex_orchestrator router (loop corners) and poses
                                    ├► apex_orchestrator.sim_nav (headless robot + barriers)
                                    └► tools/draw_lab_layout.py (docs/img/lab_layout.png)
@@ -34,7 +38,7 @@ python3 -m pytest ros2_ws -q                                       # test_lab_ge
 | `transfer` | 1.65 | 0.00 | 90 | Tray under the funnel at the gravity-chute exit, **outside the guarding**. Robot body clears the chute support by ~9 cm. |
 | `transfer_staging` | 1.65 | −0.60 | 90 | Nav2 route ends here; the precise final approach starts here. |
 | `return_drop` | 1.65 | 0.62 | 90 | Beside the return bin: the robot tilts its tray to the left and the damaged parts slide in. |
-| `dock` | 2.60 | −1.20 | 0 | Charging dock on the east wall. |
+| `dock` | 2.60 | −1.20 | 0 | Charging dock east of the loop (needs an outlet). |
 | `station_a` | 0.00 | 1.75 | 180 | Delivery station A (north corridor). |
 | `station_b` | 0.00 | −1.75 | 0 | Delivery station B (south corridor). |
 
@@ -44,10 +48,10 @@ All poses are `[TBD]` until the lab is measured; change them in one place (`lab.
 
 | World | Contents | Used for |
 |---|---|---|
-| `apex_lab` | room, FlexBase, gravity chute + funnel, chute support, return bin, station tables | normal runs, demos (a) and (c) |
+| `apex_lab` | Room 101 (CAD walls), FlexBase, gravity chute + funnel, chute support, return bin, station tables | normal runs, demos (a) and (c) |
 | `apex_lab_obstacles` | + a small box in the north corridor (passable) | Nav2 local avoidance |
-| `apex_lab_blocked_north` | + a barrier across the north corridor | demo (b): reroute the other way |
-| `apex_lab_blocked_south` | + a barrier across the south corridor | reroute in the other direction |
+| `apex_lab_blocked_north` | + a barrier from the island to the north wall | demo (b): reroute the other way |
+| `apex_lab_blocked_south` | + a barrier from the island to the south wall | reroute in the other direction |
 
 Every world is named `apex_lab` inside the SDF (the ROS-Gazebo bridge topics use the world name).
 
@@ -93,7 +97,43 @@ the island and that no named pose's footprint touches it.
 The keepout zone only guides planning. **It is not a safety function** (RA-11). The mask must be
 in the **same frame as Nav2's map**, so use it with a map aligned to `lab.yaml` (below).
 
+## The real room: `room:` in lab.yaml
+
+```yaml
+room:
+  blueprint: {package: apex_mapping, path: Connor_Room101/blueprint/room101_blueprint.yaml}
+  flexbase_in_room: [9.73, 4.97, 0]     # [x m, y m, yaw deg] of the FlexBase centre in the room frame  [TBD]
+  real_map: {package: apex_mapping, path: Connor_Room101/maps/room101_merged.yaml}
+```
+
+* `room = R(yaw) · lab + (x, y)`: the lab frame (poses, loop, keepout) stays attached to the
+  FlexBase; moving the FlexBase in the room is **one line**. Keep yaw a multiple of 90° (the
+  walls stay a few clean boxes).
+* `apex_bringup/room.py` resamples the blueprint into the lab frame; `LabModel.walls()` merges
+  its wall pixels into boxes (117 for Room 101) for Gazebo, the Nav2 map, the RL world and the
+  figures; `LabModel.outer` is the room floor's bounding box; `LabModel.in_room(x, y)`.
+* Obstacles with `span: north|south` reach from the island edge to the room wall on that side.
+* `maps/apex_lab_real.yaml` = `real_map` moved into the lab frame: a real map Nav2 can use
+  directly, poses and keepout lined up, **once `flexbase_in_room` is measured**.
+* Without `room:` the lab is the old plain box round the corridors (tests cover both).
+
+**`layout_check`** - does the loop footprint (island + 5 ft lane) fit round the real furniture?
+
+```bash
+ros2 run apex_bringup layout_check                  # the placement in lab.yaml; exit 1 if it does not fit
+ros2 run apex_bringup layout_check --search         # + the 5 placements with the least in the way
+ros2 run apex_bringup layout_check --at 4.0 3.5 90 --out /tmp/try
+```
+
+Writes `layout_check.png` (real map, layout on top, objects in the lane red) and `.json`
+(objects with size and position in the room and lab frames, poses that land on something).
+Result for Room 101 as mapped on 2026-11-27: [`docs/LAB_LAYOUT.md` §1a](../../../docs/LAB_LAYOUT.md).
+
 ## Aligning a real SLAM map with lab.yaml (task M3)
+
+With `room:` set and `flexbase_in_room` measured, a map merged into the room blueprint
+(`blueprint_merge`) needs **no pairs**: `generate_lab.py` writes it in the lab frame
+(`maps/apex_lab_real.yaml`). `align_map` is for any other map (e.g. a raw SLAM map):
 
 A SLAM map has its own origin (where mapping started). The poses, routes and keepout mask are
 in the `lab.yaml` frame (origin at the FlexBase centre). `align_map` finds the rotation + shift
