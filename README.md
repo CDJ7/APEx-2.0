@@ -302,6 +302,12 @@ python -m apex_station.app --sensors ros
 - **Remove junk:** a forgotten chair can still be painted out of `lab_real_merged.pgm` in
   white.
 
+**The current Room 101 map** is
+[`ros2_ws/src/apex_mapping/Connor_Room101/maps/room101_merged.yaml`](ros2_ws/src/apex_mapping/Connor_Room101/maps/)
+(recorded 2026-11-27 with `map_lab.sh room101`, merged into the CAD blueprint and anchored on the
+dock). For a new one: dock power saver off (`ssh -t ubuntu@192.168.0.3 'sudo ~/power-saver-off.sh'`),
+start on the dock, and follow [`Connor_Room101/README.md`](ros2_ws/src/apex_mapping/Connor_Room101/README.md).
+
 **6. Next steps** (in [`docs/TURTLEBOT_STATUS.md`](docs/TURTLEBOT_STATUS.md), tasks M3-M4 and
 N1): align the merged map to the `lab.yaml` frame (`align_map --map lab_real_merged.yaml
 --pairs ...`), then navigate with
