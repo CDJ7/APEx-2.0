@@ -24,5 +24,5 @@ editing these files.
 
 The Room 101 blueprint is derived from the building's CAD drawing as published in the TourBot
 repository; it is used under the same arrangement (APEx shares its Room 101 map back, now also
-in TourBot's building frame: `Connor_Room101/maps/room101_building.yaml`). **[CONFIRM with the
-TourBot team that using their CAD file this way is covered.]**
+in TourBot's building frame: `Connor_Room101/maps/room101_building.yaml`). The TourBot team
+confirmed on 2026-11-27 that using their CAD file this way, and sharing the map, is covered.
